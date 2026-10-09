@@ -15,6 +15,9 @@ It runs three ways from one codebase:
 - **API**: `POST /api/runs` on a hosted instance answers with the report, for
   pipelines that should not install anything.
 
+It also has a **portable memory chat**: ChatGPT using memories that live in the
+target's HCP vault, read through an agent grant (see [Portable memory](#portable-memory)).
+
 It ships with a **reference HCP implementation** that passes every check. The
 suite's own tests run against it twice: once as written, and once with a
 deliberate defect per check, to prove that each check catches the defect it
@@ -30,6 +33,7 @@ exists for.
 ## Contents
 
 - [Quick start](#quick-start)
+- [Portable memory](#portable-memory)
 - [What a target needs](#what-a-target-needs)
 - [What it checks](#what-it-checks)
 - [Reading a report](#reading-a-report)
@@ -126,6 +130,34 @@ the report.
 | `--list` | Print the check catalogue. |
 
 Exit status: `0` when no MUST check failed, `1` when one did, `2` for a usage error.
+
+## Portable memory
+
+The **Chat** page shows what HCP is for: memory that belongs to the person, not
+to the assistant. It is a chat with ChatGPT whose memories come from the target's
+HCP vault.
+
+1. Connect to a target as for a run, with the conformance hook or an agent token.
+   **Use the reference implementation** works here too.
+2. Give an OpenAI API key, and a model if not the default (`gpt-5.4-mini`).
+3. The page connects to the vault as an agent: with the hook, a fresh subject and
+   a grant on one category; with an agent token, whatever that token's grant allows.
+4. Save memories to the vault, or bring a vault that already has some. Another
+   assistant may have written them.
+5. Chat. For each message the page searches the vault with the message as the
+   query and gives ChatGPT only the memories that came back, listed under the reply.
+   Untick **Use memories from the vault** to send the same message with none, for
+   comparison.
+
+So the memory is portable: whatever wrote it, ChatGPT reads it through the
+person's own grant, and only the part a question needs leaves the vault.
+
+The page holds no state either. The OpenAI key stays in the encrypted session
+cookie, the conversation lives in the page, and requests ask OpenAI not to store
+anything (`store: false`). The recalled memories do go to OpenAI, so point it at
+synthetic data or a vault whose owner agrees. With the hook, the subject is
+deleted when the page closes cleanly. `OPENAI_BASE_URL` points it at an
+OpenAI-compatible Responses API instead.
 
 ## What a target needs
 
@@ -228,6 +260,7 @@ then applies per instance.
 | `MAX_CONCURRENT_RUNS` | `4` | Runs at once per instance. More are refused (429 on the API). |
 | `UI_BASIC_AUTH` | unset | `user:password` to put the runner and the API behind basic auth. `/health` and `/reference` stay open. |
 | `REFERENCE_SERVER` | `true` | Serve the reference implementation at `/reference`. |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | The Responses API the chat page calls. |
 | `REFERENCE_HOOK_SECRET` | `reference-hook-secret` | The reference hook's secret. The connect page's demo button uses it: the reference holds only synthetic, in-memory data. |
 
 **Security notes for a public instance.**

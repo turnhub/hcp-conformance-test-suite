@@ -37,7 +37,8 @@ if config_env() != :test do
       max_concurrent_runs: env.("MAX_CONCURRENT_RUNS", &String.to_integer/1),
       basic_auth: env.("UI_BASIC_AUTH", & &1),
       reference_server: env.("REFERENCE_SERVER", truthy?),
-      reference_hook_secret: env.("REFERENCE_HOOK_SECRET", & &1)
+      reference_hook_secret: env.("REFERENCE_HOOK_SECRET", & &1),
+      openai_base_url: env.("OPENAI_BASE_URL", & &1)
     ]
     |> Enum.reject(fn {_key, value} -> is_nil(value) end)
 

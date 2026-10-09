@@ -39,9 +39,10 @@ defmodule HcpConformanceWeb.Layouts do
       <div class="flex-1">
         <.link navigate={~p"/"} class="btn btn-ghost">HCP conformance</.link>
       </div>
-      <div class="flex-none">
-        <ul class="menu menu-horizontal items-center">
+      <div class="flex-none max-w-full">
+        <ul class="menu menu-horizontal flex-wrap items-center">
           <li><.link navigate={~p"/run"}>Run</.link></li>
+          <li><.link navigate={~p"/chat"}>Chat</.link></li>
           <li><.link navigate={~p"/checks"}>Checks</.link></li>
           <li><.link navigate={~p"/hook"}>Hook</.link></li>
           <li><.theme_toggle /></li>
