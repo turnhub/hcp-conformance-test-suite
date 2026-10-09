@@ -58,10 +58,9 @@ rows of its own, in the order it happened. While a check runs, the progress card
 names it and counts its requests. The full report downloads as JSON.
 
 Credentials are redacted everywhere: in the results, the report and the requests
-shown with them.
-That covers the suite's bearer tokens, the hook secret, the tokens the hook hands
+shown with them. That covers the suite's bearer tokens, the hook secret, the tokens the hook hands
 out (registered as secrets before their response is shown) and cookies in either
-direction. Requests go straight from the run to your page. It is not written
+direction. Requests go straight from the run to your page. They are not written
 to the server's logs, so other people's payloads never land in the operator's
 log files. **Use the reference implementation**
 shows a passing run without any setup.
