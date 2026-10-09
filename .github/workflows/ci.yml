@@ -25,12 +25,21 @@ jobs:
             deps
             _build
           key: mix-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
+      - name: Cache Dialyzer PLTs
+        uses: actions/cache@v4
+        with:
+          path: priv/plts
+          key: plts-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
+          restore-keys: plts-${{ matrix.elixir }}-
       - run: mix local.hex --force && mix local.rebar --force
       - run: mix deps.get
       - run: mix deps.unlock --check-unused
       - run: mix format --check-formatted
-      - run: mix compile --warnings-as-errors
+      - name: Compile, with Boundary's cross-boundary checks
+        run: mix compile --warnings-as-errors
+      - run: mix credo --strict
       - run: mix test
+      - run: mix dialyzer --format github
 
   docker:
     runs-on: ubuntu-latest

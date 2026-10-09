@@ -1,6 +1,9 @@
 defmodule HcpConformance.ReferenceTarget do
   @moduledoc "Starts a reference HCP server on a random local port, optionally with faults switched on."
 
+  # Test support only: it serves the reference for the suite's tests to run against.
+  use Boundary, top_level?: true, deps: [HcpConformance.Reference]
+
   alias HcpConformance.Reference.{Server, Store}
 
   @secret "test-hook-secret"

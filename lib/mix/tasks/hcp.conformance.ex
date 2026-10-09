@@ -8,6 +8,7 @@ defmodule Mix.Tasks.Hcp.Conformance do
   """
 
   use Mix.Task
+  use Boundary, classify_to: HcpConformance
 
   @impl Mix.Task
   def run(argv) do

@@ -19,6 +19,10 @@ defmodule HcpConformance do
   hook, and docs/CHECKS.md for every check and the section it tests.
   """
 
+  # The suite: checks, runner, reports. It knows nothing of the web layer or the
+  # reference implementation, which it tests like any other target.
+  use Boundary, deps: [], exports: [Catalog, CLI, Config, Runs, Settings]
+
   alias HcpConformance.{Config, Runner}
 
   @doc "Runs the suite. `opts[:on_event]` receives progress events."

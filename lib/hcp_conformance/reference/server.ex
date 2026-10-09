@@ -381,56 +381,81 @@ defmodule HcpConformance.Reference.Server do
   end
 
   @doc false
-  def validate_entry(body) do
-    claim = is_map(body) && body["claim"]
-    record = is_map(body) && body["record"]
-    provenance = is_map(record) && record["provenance"]
-    declaration = is_map(record) && record["declarationType"]
-    confidence = is_map(record) && record["confidence"]
-    category = is_map(record) && record["category"]
+  def validate_entry(%{"credentialType" => "VerifiablePreference"}),
+    do: {:error, "Tier 2 entries are not supported"}
 
-    cond do
-      not is_map(body) ->
-        {:error, "the body must be an HCPEntry object"}
-
-      body["credentialType"] == "VerifiablePreference" ->
-        {:error, "Tier 2 entries are not supported"}
-
-      not is_map(claim) or not is_map(record) ->
-        {:error, "claim and record are required (grouped form)"}
-
-      not (is_map(claim["issuer"]) and is_binary(claim["issuer"]["id"])) ->
-        {:error, "claim.issuer.id is required"}
-
-      not (is_map(claim["subject"]) and is_binary(claim["subject"]["id"])) ->
-        {:error, "claim.subject.id is required"}
-
-      not (is_binary(claim["subject"]["preference"]) or is_map(claim["subject"]["preference"])) ->
-        {:error, "claim.subject.preference is required"}
-
-      not (is_binary(category) and
-               (category in @categories or String.starts_with?(category, "hcp-custom:"))) ->
-        {:error, "record.category must be a registered category"}
-
-      not (is_nil(record["dimension"]) or is_binary(record["dimension"])) ->
-        {:error, "record.dimension must be a string"}
-
-      declaration not in ["user-declared", "model-inferred", "issuer-attested"] ->
-        {:error, "record.declarationType is required"}
-
-      declaration == "model-inferred" and confidence not in ["high", "medium", "low"] ->
-        {:error, "model-inferred entries require confidence"}
-
-      declaration != "model-inferred" and not is_nil(confidence) ->
-        {:error, "confidence must be null unless model-inferred"}
-
-      not (is_map(provenance) and is_binary(provenance["source"])) ->
-        {:error, "record.provenance.source is required"}
-
-      true ->
-        :ok
+  def validate_entry(%{"claim" => claim, "record" => record})
+      when is_map(claim) and is_map(record) do
+    case claim_error(claim) || record_error(record) do
+      nil -> :ok
+      message -> {:error, message}
     end
   end
+
+  def validate_entry(body) when is_map(body),
+    do: {:error, "claim and record are required (grouped form)"}
+
+  def validate_entry(_body), do: {:error, "the body must be an HCPEntry object"}
+
+  defp claim_error(claim) do
+    cond do
+      not match?(%{"issuer" => %{"id" => id}} when is_binary(id), claim) ->
+        "claim.issuer.id is required"
+
+      not match?(%{"subject" => %{"id" => id}} when is_binary(id), claim) ->
+        "claim.subject.id is required"
+
+      not match?(
+        %{"preference" => preference} when is_binary(preference) or is_map(preference),
+        claim["subject"]
+      ) ->
+        "claim.subject.preference is required"
+
+      true ->
+        nil
+    end
+  end
+
+  defp record_error(record) do
+    cond do
+      not registered_category?(record["category"]) ->
+        "record.category must be a registered category"
+
+      not (is_nil(record["dimension"]) or is_binary(record["dimension"])) ->
+        "record.dimension must be a string"
+
+      message = declaration_error(record) ->
+        message
+
+      not match?(%{"provenance" => %{"source" => source}} when is_binary(source), record) ->
+        "record.provenance.source is required"
+
+      true ->
+        nil
+    end
+  end
+
+  defp registered_category?(category) when is_binary(category),
+    do: category in @categories or String.starts_with?(category, "hcp-custom:")
+
+  defp registered_category?(_category), do: false
+
+  # Only a model-inferred entry carries a confidence, and it must.
+  defp declaration_error(%{"declarationType" => "model-inferred", "confidence" => confidence})
+       when confidence in ["high", "medium", "low"],
+       do: nil
+
+  defp declaration_error(%{"declarationType" => "model-inferred"}),
+    do: "model-inferred entries require confidence"
+
+  defp declaration_error(%{"declarationType" => declaration} = record)
+       when declaration in ["user-declared", "issuer-attested"] do
+    if is_nil(record["confidence"]),
+      do: nil,
+      else: "confidence must be null unless model-inferred"
+  end
+
+  defp declaration_error(_record), do: "record.declarationType is required"
 
   defp add(request, subject, actor) do
     idempotent(request, subject, "POST /v1/preferences", fn subject ->
@@ -502,20 +527,19 @@ defmodule HcpConformance.Reference.Server do
   end
 
   defp search(request, subject, actor) do
-    body = if is_map(request.json), do: request.json, else: %{}
+    body = json_object(request)
     categories = body["categories"]
     max = body["maxEntries"]
     detail = body["responseDetail"] || "full"
 
     cond do
-      not is_list(categories) or categories == [] or not Enum.all?(categories, &is_binary/1) ->
+      not non_empty_list?(categories, &is_binary/1) ->
         {problem("malformed-request", "categories is required"), subject}
 
-      not fault?(request, :no_purpose_check) and
-          not (is_binary(body["purpose"]) and body["purpose"] != "") ->
+      not (purpose?(body["purpose"]) or fault?(request, :no_purpose_check)) ->
         {problem("malformed-request", "purpose is required"), subject}
 
-      not (is_nil(max) or (is_integer(max) and max > 0)) ->
+      not optional?(max, &positive_integer?/1) ->
         {problem("malformed-request", "maxEntries must be a positive integer"), subject}
 
       detail not in ["full", "minimal"] ->
@@ -616,22 +640,22 @@ defmodule HcpConformance.Reference.Server do
 
   defp shape(envelope, actor, request, _full), do: redact(envelope, actor, request)
 
-  defp tokens(nil), do: MapSet.new()
+  # Distinct lowercase words of two or more letters or digits.
+  defp tokens(nil), do: []
 
   defp tokens(text) when is_binary(text) do
     ~r/[\p{L}\p{N}]+/u
     |> Regex.scan(String.downcase(text))
     |> List.flatten()
     |> Enum.filter(&(String.length(&1) > 1))
-    |> MapSet.new()
+    |> Enum.uniq()
   end
 
   defp tokens(other), do: tokens(Jason.encode!(other))
 
   defp score(query, envelope) do
-    query
-    |> MapSet.intersection(tokens(envelope["claim"]["subject"]["preference"]))
-    |> MapSet.size()
+    words = tokens(envelope["claim"]["subject"]["preference"])
+    Enum.count(query, &(&1 in words))
   end
 
   defp get_entry(request, subject, actor, id) do
@@ -640,22 +664,13 @@ defmodule HcpConformance.Reference.Server do
     envelope = current(subject, id)
 
     cond do
-      not (is_binary(purpose) and purpose != "") ->
+      not purpose?(purpose) ->
         {problem("malformed-request", "purpose is required"), subject}
 
-      is_nil(envelope) ->
-        if user?(actor) or not fault?(request, :not_found_for_agent),
-          do:
-            {problem("scope-denied", "Entry is outside the caller's scopes or does not exist"),
-             subject},
-          else: {not_found("No such entry"), subject}
+      is_nil(envelope) and fault?(request, :not_found_for_agent) and not user?(actor) ->
+        {not_found("No such entry"), subject}
 
-      not user?(actor) and hidden_from_agent?(envelope, version, request) ->
-        {problem("scope-denied", "Entry is outside the caller's scopes or does not exist"),
-         subject}
-
-      not allowed?(actor, category_of(envelope), "read") or
-          not within_restrictions?(actor, category_of(envelope), "read", id) ->
+      is_nil(envelope) or not readable?(request, actor, envelope, version) ->
         {problem("scope-denied", "Entry is outside the caller's scopes or does not exist"),
          subject}
 
@@ -663,6 +678,25 @@ defmodule HcpConformance.Reference.Server do
         read_version(request, subject, actor, id, version, purpose)
     end
   end
+
+  defp readable?(request, actor, envelope, version) do
+    category = category_of(envelope)
+
+    (user?(actor) or not hidden_from_agent?(envelope, version, request)) and
+      allowed?(actor, category, "read") and
+      within_restrictions?(actor, category, "read", envelope["id"])
+  end
+
+  defp json_object(%{json: json}) when is_map(json), do: json
+  defp json_object(_request), do: %{}
+
+  defp purpose?(purpose), do: is_binary(purpose) and purpose != ""
+  defp positive_integer?(value), do: is_integer(value) and value > 0
+  defp within_a_day?(seconds), do: positive_integer?(seconds) and seconds <= 86_400
+  defp optional?(value, valid?), do: is_nil(value) or valid?.(value)
+
+  defp non_empty_list?(value, valid?),
+    do: is_list(value) and value != [] and Enum.all?(value, valid?)
 
   defp hidden_from_agent?(envelope, version, request) do
     status_of(envelope) in ["conflicted", "deleted"] and
@@ -890,28 +924,33 @@ defmodule HcpConformance.Reference.Server do
   defp detect_conflicts(subject, request, id) do
     entry = current(subject, id)
 
-    cond do
-      fault?(request, :no_conflicts) or status_of(entry) != "active" ->
-        subject
+    if fault?(request, :no_conflicts) or status_of(entry) != "active",
+      do: subject,
+      else: quarantine_conflicts(subject, request, entry)
+  end
 
-      entry["record"]["declarationType"] == "model-inferred" ->
-        case Enum.find(
-               currents(subject),
-               &(declared?(&1) and status_of(&1) == "active" and conflicting?(&1, entry))
-             ) do
+  # §2.6: a new inference that contradicts a declaration is quarantined, and a new
+  # declaration quarantines every inference it contradicts.
+  defp quarantine_conflicts(subject, request, entry) do
+    cond do
+      inferred?(entry) ->
+        case Enum.find(currents(subject), &(declared?(&1) and active_conflict?(&1, entry))) do
           nil -> subject
           declared -> quarantine(subject, request, entry, declared)
         end
 
-      entry["record"]["declarationType"] == "user-declared" ->
+      declared?(entry) ->
         currents(subject)
-        |> Enum.filter(&(inferred?(&1) and status_of(&1) == "active" and conflicting?(&1, entry)))
+        |> Enum.filter(&(inferred?(&1) and active_conflict?(&1, entry)))
         |> Enum.reduce(subject, &quarantine(&2, request, &1, entry))
 
       true ->
         subject
     end
   end
+
+  defp active_conflict?(candidate, entry),
+    do: status_of(candidate) == "active" and conflicting?(candidate, entry)
 
   defp declared?(envelope), do: envelope["record"]["declarationType"] == "user-declared"
   defp inferred?(envelope), do: envelope["record"]["declarationType"] == "model-inferred"
@@ -932,8 +971,7 @@ defmodule HcpConformance.Reference.Server do
   defp declared_counterpart(subject, inferred) do
     case Enum.find(
            currents(subject),
-           &(&1 != nil and declared?(&1) and status_of(&1) == "active" and
-               conflicting?(&1, inferred))
+           &(&1 != nil and declared?(&1) and active_conflict?(&1, inferred))
          ) do
       nil -> nil
       declared -> declared["id"]
@@ -973,31 +1011,29 @@ defmodule HcpConformance.Reference.Server do
         &(inferred?(&1) and status_of(&1) == "conflicted" and
             category_of(&1) == category_of(revised))
       )
-      |> Enum.reduce(subject, fn inferred, acc ->
-        still =
-          Enum.any?(
-            currents(acc),
-            &(declared?(&1) and status_of(&1) == "active" and conflicting?(&1, inferred))
-          )
-
-        if still do
-          acc
-        else
-          acc
-          |> put_current(inferred["id"], put_in(inferred, ["record", "status"], "active"))
-          |> append(
-            request,
-            actor_event(actor, %{
-              "eventType" => "conflict.resolved",
-              "entryId" => inferred["id"],
-              "relatedEntryId" => revised["id"],
-              "detail" => "superseded"
-            })
-          )
-        end
-      end)
+      |> Enum.reduce(subject, &release_if_unopposed(&2, request, actor, &1, revised))
     else
       subject
+    end
+  end
+
+  # A quarantined inference returns to active once no active declaration
+  # contradicts it.
+  defp release_if_unopposed(subject, request, actor, inferred, revised) do
+    if Enum.any?(currents(subject), &(declared?(&1) and active_conflict?(&1, inferred))) do
+      subject
+    else
+      subject
+      |> put_current(inferred["id"], put_in(inferred, ["record", "status"], "active"))
+      |> append(
+        request,
+        actor_event(actor, %{
+          "eventType" => "conflict.resolved",
+          "entryId" => inferred["id"],
+          "relatedEntryId" => revised["id"],
+          "detail" => "superseded"
+        })
+      )
     end
   end
 
@@ -1200,17 +1236,17 @@ defmodule HcpConformance.Reference.Server do
           {problem("idempotency-conflict", "The key was used with a different body"), subject}
 
         nil ->
-          {response, subject} = operation.(subject)
-
-          stored =
-            if elem(response, 0) in 200..299,
-              do: Map.put(subject.idempotency, {endpoint, key}, {fingerprint, response}),
-              else: subject.idempotency
-
-          {response, %{subject | idempotency: stored}}
+          remember(operation.(subject), {endpoint, key}, fingerprint)
       end
     end
   end
+
+  # Only a success is replayed; a failed request may be retried with the same key.
+  defp remember({{status, _, _, _} = response, subject}, slot, fingerprint)
+       when status in 200..299,
+       do: {response, put_in(subject.idempotency[slot], {fingerprint, response})}
+
+  defp remember(result, _slot, _fingerprint), do: result
 
   # The conformance hook (docs/HOOK.md) ----------------------------------------------
 
@@ -1262,42 +1298,46 @@ defmodule HcpConformance.Reference.Server do
 
   defp hook_route(_request, _path, _store), do: not_found("No such hook route")
 
+  defp grant_request_error(body, scopes, grant_type, seconds, restrictions) do
+    cond do
+      not non_empty_list?(scopes, &grant_scope?/1) ->
+        "scopes must be hcp:{category}:{read|write} strings without wildcards"
+
+      grant_type not in ["temporary", "persistent"] ->
+        "grantType must be temporary or persistent"
+
+      grant_type == "temporary" and not within_a_day?(seconds) ->
+        "a temporary grant expires within 24 hours"
+
+      not restrictions_held?(restrictions, scopes) ->
+        "every restriction must reference a scope the grant holds"
+
+      not (is_binary(body["clientId"]) and is_binary(body["clientName"])) ->
+        "clientId and clientName are required"
+
+      true ->
+        nil
+    end
+  end
+
+  defp grant_scope?(scope),
+    do: is_binary(scope) and Regex.match?(~r/^hcp:[^*\s]+:(read|write)$/, scope)
+
+  defp restrictions_held?(nil, _scopes), do: true
+
+  defp restrictions_held?(restrictions, scopes) when is_list(restrictions),
+    do: Enum.all?(restrictions, &(is_map(&1) and &1["scope"] in scopes))
+
+  defp restrictions_held?(_restrictions, _scopes), do: false
+
   defp issue_grant(request, state, subject) do
-    body = if is_map(request.json), do: request.json, else: %{}
+    body = json_object(request)
     scopes = body["scopes"]
     grant_type = body["grantType"] || "temporary"
     seconds = body["expiresInSeconds"] || 3600
     restrictions = body["restrictions"]
 
-    error =
-      cond do
-        not (is_list(scopes) and scopes != [] and
-                 Enum.all?(
-                   scopes,
-                   &(is_binary(&1) and Regex.match?(~r/^hcp:[^*\s]+:(read|write)$/, &1))
-                 )) ->
-          "scopes must be hcp:{category}:{read|write} strings without wildcards"
-
-        grant_type not in ["temporary", "persistent"] ->
-          "grantType must be temporary or persistent"
-
-        grant_type == "temporary" and
-            not (is_integer(seconds) and seconds > 0 and seconds <= 86_400) ->
-          "a temporary grant expires within 24 hours"
-
-        not (is_nil(restrictions) or
-                 (is_list(restrictions) and
-                    Enum.all?(restrictions, &(is_map(&1) and &1["scope"] in scopes)))) ->
-          "every restriction must reference a scope the grant holds"
-
-        not (is_binary(body["clientId"]) and is_binary(body["clientName"])) ->
-          "clientId and clientName are required"
-
-        true ->
-          nil
-      end
-
-    if error do
+    if error = grant_request_error(body, scopes, grant_type, seconds, restrictions) do
       {problem("malformed-request", error), state}
     else
       grant_id = urn_uuid()
@@ -1351,5 +1391,15 @@ defmodule HcpConformance.Reference.Server do
 
   defp iso(datetime), do: DateTime.to_iso8601(datetime)
   defp random_token, do: Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
-  defp urn_uuid, do: "urn:uuid:" <> HcpConformance.Checks.Entries.uuid4()
+
+  # Its own generator rather than the checks': the reference shares no code with
+  # the suite, so the two can never share a bug.
+  defp urn_uuid do
+    <<a::48, _::4, b::12, _::2, c::62>> = :crypto.strong_rand_bytes(16)
+
+    <<p1::binary-8, p2::binary-4, p3::binary-4, p4::binary-4, p5::binary-12>> =
+      Base.encode16(<<a::48, 4::4, b::12, 2::2, c::62>>, case: :lower)
+
+    "urn:uuid:#{p1}-#{p2}-#{p3}-#{p4}-#{p5}"
+  end
 end

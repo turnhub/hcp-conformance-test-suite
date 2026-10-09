@@ -498,9 +498,8 @@ defmodule HcpConformance.Checks.Entries do
     Assert.problem!(response, 403, "scope-denied", "a read-only client adding an entry")
   end
 
-  @doc "A random version 4 UUID."
   @spec uuid4() :: String.t()
-  def uuid4 do
+  defp uuid4 do
     <<a::48, _::4, b::12, _::2, c::62>> = :crypto.strong_rand_bytes(16)
     <<u0::32, u1::16, u2::16, u3::16, u4::48>> = <<a::48, 4::4, b::12, 2::2, c::62>>
 

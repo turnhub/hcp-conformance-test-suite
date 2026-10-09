@@ -1,8 +1,8 @@
 defmodule HcpConformance.UnitTest do
   use ExUnit.Case, async: true
 
-  alias HcpConformance.{Config, Envelope, TargetGuard}
   alias HcpConformance.Checks.{Audit, Grants}
+  alias HcpConformance.{Config, Envelope, TargetGuard}
 
   @entry %{
     "@context" => Envelope.context(),
@@ -101,9 +101,49 @@ defmodule HcpConformance.UnitTest do
         assert TargetGuard.private?(address), inspect(address)
       end
 
-      for address <- [{8, 8, 8, 8}, {1, 1, 1, 1}, {0x2606, 0x4700, 0, 0, 0, 0, 0, 0x1111}] do
+      for address <- [
+            {8, 8, 8, 8},
+            {1, 1, 1, 1},
+            {0x2606, 0x4700, 0, 0, 0, 0, 0, 0x1111},
+            {0, 0, 0, 0, 0, 0xFFFF, 0x0808, 0x0808}
+          ] do
         refute TargetGuard.private?(address), inspect(address)
       end
+    end
+
+    test "draws each IPv4 block's edges exactly" do
+      private = [
+        {0, 255, 255, 255},
+        {100, 64, 0, 0},
+        {100, 127, 255, 255},
+        {172, 31, 255, 255},
+        {198, 18, 0, 0},
+        {198, 19, 255, 255},
+        {224, 0, 0, 0},
+        {255, 255, 255, 255}
+      ]
+
+      public = [
+        {1, 0, 0, 0},
+        {9, 255, 255, 255},
+        {11, 0, 0, 0},
+        {100, 63, 255, 255},
+        {100, 128, 0, 0},
+        {126, 255, 255, 255},
+        {128, 0, 0, 0},
+        {169, 253, 255, 255},
+        {169, 255, 0, 0},
+        {172, 15, 255, 255},
+        {172, 32, 0, 0},
+        {192, 167, 255, 255},
+        {192, 169, 0, 0},
+        {198, 17, 255, 255},
+        {198, 20, 0, 0},
+        {223, 255, 255, 255}
+      ]
+
+      assert Enum.reject(private, &TargetGuard.private?/1) == []
+      assert Enum.filter(public, &TargetGuard.private?/1) == []
     end
 
     test "refuses private targets unless allowed" do

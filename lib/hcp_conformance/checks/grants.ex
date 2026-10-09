@@ -128,12 +128,11 @@ defmodule HcpConformance.Checks.Grants do
 
     [
       {is_binary(grant["grantId"]), "grantId must be a string"},
-      {is_map(grant["client"]) and is_binary(grant["client"]["id"]),
+      {match?(%{"client" => %{"id" => id}} when is_binary(id), grant),
        "client.id must be a string"},
-      {is_map(grant["client"]) and is_binary(grant["client"]["name"]) and
-         grant["client"]["name"] != "", "client.name must be a name the person can recognize"},
-      {is_list(scopes) and scopes != [] and Enum.all?(scopes, &scope?/1),
-       "scopes must be hcp:{category}:{read|write} strings, no wildcards"},
+      {match?(%{"client" => %{"name" => name}} when is_binary(name) and name != "", grant),
+       "client.name must be a name the person can recognize"},
+      {scopes?(scopes), "scopes must be hcp:{category}:{read|write} strings, no wildcards"},
       {type in @grant_types, "grantType must be temporary or persistent"},
       {Envelope.iso8601?(grant["issuedAt"]), "issuedAt must be ISO-8601"},
       {type != "temporary" or Envelope.iso8601?(grant["expiresAt"]),
@@ -141,9 +140,7 @@ defmodule HcpConformance.Checks.Grants do
       {type != "persistent" or is_nil(grant["expiresAt"]),
        "a persistent grant must carry a null expiresAt"},
       {grant["status"] in @statuses, "status must be active, revoked or expired"},
-      {is_nil(restrictions) or
-         (is_list(restrictions) and
-            Enum.all?(restrictions, &(is_map(&1) and &1["scope"] in List.wrap(scopes)))),
+      {restrictions_within?(restrictions, scopes),
        "every restriction must reference a scope the grant holds"}
     ]
     |> Enum.reject(&elem(&1, 0))
@@ -153,6 +150,15 @@ defmodule HcpConformance.Checks.Grants do
   def grant_violations(_grant), do: ["a grant must be a JSON object"]
 
   defp scope?(scope), do: is_binary(scope) and Regex.match?(~r/^hcp:[^*\s]+:(read|write)$/, scope)
+
+  defp scopes?(scopes), do: is_list(scopes) and scopes != [] and Enum.all?(scopes, &scope?/1)
+
+  defp restrictions_within?(nil, _scopes), do: true
+
+  defp restrictions_within?(restrictions, scopes) when is_list(restrictions),
+    do: Enum.all?(restrictions, &(is_map(&1) and &1["scope"] in List.wrap(scopes)))
+
+  defp restrictions_within?(_restrictions, _scopes), do: false
 
   defp list!(ctx, token, params \\ []) do
     response = Context.request(ctx, :get, Context.url(ctx, :grants), token: token, params: params)

@@ -32,11 +32,11 @@ defmodule HcpConformance.Context do
     :envelope_form,
     :read_window_ms,
     :nonce,
-    capabilities: MapSet.new(),
+    capabilities: [],
     setup_notes: []
   ]
 
-  @type t :: %__MODULE__{}
+  @type t :: %__MODULE__{capabilities: [atom()]}
 
   @doc "The registered category vocabulary (§2.5)."
   @spec registered_categories() :: [String.t()]
@@ -56,7 +56,12 @@ defmodule HcpConformance.Context do
       &Transcript.add_secret(transcript, &1)
     )
 
-    %__MODULE__{config: config, transcript: transcript, state: state, nonce: random_word(10)}
+    %__MODULE__{
+      config: config,
+      transcript: transcript,
+      state: state,
+      nonce: random_word(10)
+    }
     |> load_discovery()
     |> resolve_endpoints()
     |> choose_categories()
@@ -133,7 +138,7 @@ defmodule HcpConformance.Context do
 
   @doc "Whether the run has a capability."
   @spec has?(t(), atom()) :: boolean()
-  def has?(ctx, capability), do: MapSet.member?(ctx.capabilities, capability)
+  def has?(ctx, capability), do: capability in ctx.capabilities
 
   @doc """
   Issues a grant through the hook, as the subject's own act. `opts`: `:scopes`
@@ -311,13 +316,13 @@ defmodule HcpConformance.Context do
           | subject_id: subject.subject_id,
             subject_did: subject.subject_did || config.subject_did || "did:hcp:user:conformance",
             person_token: subject.person_token,
-            capabilities: ctx.capabilities |> MapSet.put(:person) |> MapSet.put(:hook)
+            capabilities: [:person, :hook | ctx.capabilities]
         }
 
         try do
           grant = issue_grant!(ctx, scopes: scopes(ctx.primary_category, ["read", "write"]))
           agent = Map.put(grant, :scopes, scopes(ctx.primary_category, ["read", "write"]))
-          %{ctx | agent: agent, capabilities: MapSet.put(ctx.capabilities, :agent)}
+          %{ctx | agent: agent, capabilities: [:agent | ctx.capabilities]}
         rescue
           error in [HcpConformance.Failure, HTTP.TransportError] ->
             %{
@@ -340,7 +345,7 @@ defmodule HcpConformance.Context do
       ctx
       | person_token: ctx.config.person_token,
         subject_did: ctx.config.subject_did || "did:hcp:user:conformance",
-        capabilities: MapSet.put(ctx.capabilities, :person)
+        capabilities: [:person | ctx.capabilities]
     }
 
     case ctx.config.agent_token do
@@ -364,7 +369,7 @@ defmodule HcpConformance.Context do
         scopes: scopes
       }
 
-      %{ctx | agent: agent, capabilities: MapSet.put(ctx.capabilities, :agent)}
+      %{ctx | agent: agent, capabilities: [:agent | ctx.capabilities]}
     else
       _other ->
         note =
@@ -381,8 +386,8 @@ defmodule HcpConformance.Context do
   @spec scopes(String.t(), [String.t()]) :: [String.t()]
   def scopes(category, actions), do: Enum.map(actions, &"hcp:#{category}:#{&1}")
 
-  defp put_capability(set, true, capability), do: MapSet.put(set, capability)
-  defp put_capability(set, _false, _capability), do: set
+  defp put_capability(capabilities, true, capability), do: [capability | capabilities]
+  defp put_capability(capabilities, _false, _capability), do: capabilities
 
   defp string_or(value, _default) when is_binary(value) and value != "",
     do: String.trim_trailing(value, "/")

@@ -56,8 +56,8 @@ defmodule HcpConformance.CLI do
 
   defp execute(opts) do
     cond do
-      opts[:help] -> IO.puts(@moduledoc) && 0
-      opts[:list] -> IO.puts(catalogue()) && 0
+      opts[:help] -> print(@moduledoc)
+      opts[:list] -> print(catalogue())
       true -> run_suite(opts)
     end
   end
@@ -124,22 +124,12 @@ defmodule HcpConformance.CLI do
       |> Enum.group_by(& &1.group)
       |> then(fn grouped -> Enum.map(Catalog.groups(), &{&1, grouped[&1] || []}) end)
       |> Enum.map(fn {group, checks} ->
-        lines =
-          Enum.map(checks, fn check ->
-            needs =
-              if check.requires == [],
-                do: "—",
-                else: Enum.map_join(check.requires, ", ", &"`#{&1}`")
-
-            "| `#{check.id}` | §#{check.section} | #{String.upcase(to_string(check.level))} | #{check.title} | #{needs} |"
-          end)
-
         Enum.join(
           [
             "## #{group}",
             "",
             "| Check | Section | Level | Requirement | Needs |",
-            "| --- | --- | --- | --- | --- |" | lines
+            "| --- | --- | --- | --- | --- |" | Enum.map(checks, &catalogue_row/1)
           ],
           "\n"
         )
@@ -156,5 +146,21 @@ defmodule HcpConformance.CLI do
 
     #{Enum.join(rows, "\n\n")}
     """
+  end
+
+  @spec catalogue_row(HcpConformance.Check.t()) :: String.t()
+  defp catalogue_row(check) do
+    needs =
+      if check.requires == [],
+        do: "—",
+        else: Enum.map_join(check.requires, ", ", &"`#{&1}`")
+
+    "| `#{check.id}` | §#{check.section} | #{String.upcase(to_string(check.level))} | #{check.title} | #{needs} |"
+  end
+
+  @spec print(String.t()) :: 0
+  defp print(text) do
+    IO.puts(text)
+    0
   end
 end

@@ -4,6 +4,7 @@ defmodule HcpConformance.FaultDetectionTest do
   # still passes. A check that cannot catch its defect is worse than none.
   use ExUnit.Case, async: true
 
+  alias HcpConformance.Reference.Server
   alias HcpConformance.ReferenceTarget
 
   @moduletag timeout: 120_000
@@ -62,6 +63,6 @@ defmodule HcpConformance.FaultDetectionTest do
 
   test "every fault the reference server offers has a case" do
     covered = Enum.map(@cases, &elem(&1, 0))
-    assert HcpConformance.Reference.Server.faults() -- covered == []
+    assert Server.faults() -- covered == []
   end
 end

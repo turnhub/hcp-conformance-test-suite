@@ -259,8 +259,9 @@ over `Hcp.issue_grant` and `Tokens.generate`.
 
 ```bash
 mix setup
-mix test           # 64 tests, about 10 seconds; no network beyond localhost
-mix precommit      # warnings as errors, unused deps, format, tests
+mix test           # 74 tests, about 10 seconds; no network beyond localhost
+mix precommit      # what CI runs: compile with warnings as errors (Boundary included),
+                   # unused deps, format, credo --strict, tests, dialyzer
 mix hcp.checks > docs/CHECKS.md    # after adding or changing a check; a test enforces it
 ```
 

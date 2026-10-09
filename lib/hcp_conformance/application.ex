@@ -5,6 +5,12 @@ defmodule HcpConformance.Application do
 
   use Application
 
+  # Starts the suite's processes, the reference implementation and the web layer,
+  # so it alone may name all three.
+  use Boundary,
+    top_level?: true,
+    deps: [HcpConformance, HcpConformance.Reference, HcpConformanceWeb]
+
   @impl true
   def start(_type, _args) do
     children = [

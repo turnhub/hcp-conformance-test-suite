@@ -172,16 +172,11 @@ defmodule HcpConformance.Checks.Export do
   defp audited(ctx) do
     export!(ctx, include: "audit,versions")
 
-    events =
-      AuditLog.await!(ctx, "preference.exported", fn event ->
-        AuditLog.event?(event, "preference.exported") and is_binary(event["detail"]) and
-          String.contains?(event["detail"], "audit") and
-          String.contains?(event["detail"], "versions")
-      end)
-
-    Assert.check!(
-      events != [],
-      "no preference.exported event records the parameters include=audit,versions"
-    )
+    # await! fails the check when no event records the parameters.
+    AuditLog.await!(ctx, "preference.exported (include=audit,versions)", fn event ->
+      AuditLog.event?(event, "preference.exported") and is_binary(event["detail"]) and
+        String.contains?(event["detail"], "audit") and
+        String.contains?(event["detail"], "versions")
+    end)
   end
 end

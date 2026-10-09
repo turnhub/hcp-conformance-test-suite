@@ -43,7 +43,7 @@ defmodule HcpConformance.Runner do
       {:started,
        %{
          total: length(checks),
-         capabilities: MapSet.to_list(ctx.capabilities),
+         capabilities: ctx.capabilities,
          setup_notes: ctx.setup_notes
        }}
     )

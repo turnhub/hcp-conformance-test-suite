@@ -35,7 +35,7 @@ defmodule HcpConformance.Report do
       partial: ctx.config.groups != nil or ctx.config.only != nil,
       summary: summary(results),
       groups: group_summaries(results),
-      capabilities: ctx.capabilities |> MapSet.to_list() |> Enum.sort(),
+      capabilities: Enum.sort(ctx.capabilities),
       setup_notes: Enum.map(ctx.setup_notes, &Transcript.redact(ctx.transcript, &1)),
       discovery: ctx.discovery,
       categories: %{

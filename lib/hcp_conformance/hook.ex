@@ -30,7 +30,7 @@ defmodule HcpConformance.Hook do
         {:ok, %{subject_id: id, subject_did: body["subjectDid"], person_token: token}}
 
       %{status: status, body: body} ->
-        {:error, "POST /subjects answered #{status}: #{String.slice(body || "", 0, 300)}"}
+        {:error, "POST /subjects answered #{status}: #{String.slice(body, 0, 300)}"}
     end
   end
 
@@ -61,8 +61,7 @@ defmodule HcpConformance.Hook do
          }}
 
       %{status: status, body: body} ->
-        {:error,
-         "POST /subjects/{id}/grants answered #{status}: #{String.slice(body || "", 0, 300)}"}
+        {:error, "POST /subjects/{id}/grants answered #{status}: #{String.slice(body, 0, 300)}"}
     end
   end
 

@@ -13,6 +13,21 @@ defmodule HcpConformance.TargetGuard do
 
   import Bitwise
 
+  # The IPv4 blocks outside the public internet, as {network, prefix length}:
+  # "this" network, private (RFC 1918), shared CGNAT space, loopback, link-local,
+  # benchmarking, and multicast plus reserved.
+  @private_ipv4 [
+    {{0, 0, 0, 0}, 8},
+    {{10, 0, 0, 0}, 8},
+    {{100, 64, 0, 0}, 10},
+    {{127, 0, 0, 0}, 8},
+    {{169, 254, 0, 0}, 16},
+    {{172, 16, 0, 0}, 12},
+    {{192, 168, 0, 0}, 16},
+    {{198, 18, 0, 0}, 15},
+    {{224, 0, 0, 0}, 3}
+  ]
+
   @spec check(String.t(), boolean()) :: :ok | {:error, String.t()}
   def check(_url, true = _allow_private), do: :ok
 
@@ -61,10 +76,10 @@ defmodule HcpConformance.TargetGuard do
 
   @doc "Whether an address is outside the public internet."
   @spec private?(:inet.ip_address()) :: boolean()
-  def private?({a, b, _c, _d}) do
-    a == 0 or a == 10 or a == 127 or (a == 100 and (b &&& 0xC0) == 64) or (a == 169 and b == 254) or
-      (a == 172 and b in 16..31) or (a == 192 and b == 168) or (a == 198 and b in 18..19) or
-      a >= 224
+  def private?({_, _, _, _} = address) do
+    Enum.any?(@private_ipv4, fn {network, bits} ->
+      prefix(address, bits) == prefix(network, bits)
+    end)
   end
 
   def private?({0, 0, 0, 0, 0, 0, 0, _last} = _loopback_or_unspecified), do: true
@@ -76,4 +91,7 @@ defmodule HcpConformance.TargetGuard do
   def private?({first, _, _, _, _, _, _, _}) when (first &&& 0xFFC0) == 0xFE80, do: true
   def private?({first, _, _, _, _, _, _, _}) when (first &&& 0xFF00) == 0xFF00, do: true
   def private?(_address), do: false
+
+  @spec prefix(:inet.ip4_address(), 0..32) :: non_neg_integer()
+  defp prefix({a, b, c, d}, bits), do: (a <<< 24 ||| b <<< 16 ||| c <<< 8 ||| d) >>> (32 - bits)
 end

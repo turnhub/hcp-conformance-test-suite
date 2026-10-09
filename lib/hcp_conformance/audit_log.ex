@@ -43,7 +43,7 @@ defmodule HcpConformance.AuditLog do
   Waits until at least one event satisfies `match`, and returns the matches.
   `read?: true` allows the declared `preference.read` durability window.
   """
-  @spec await!(Context.t(), String.t(), (map() -> boolean()), keyword()) :: [map()]
+  @spec await!(Context.t(), String.t(), (map() -> boolean()), keyword()) :: [map(), ...]
   def await!(ctx, label, match, opts \\ []) do
     window = if Keyword.get(opts, :read?, false), do: ctx.read_window_ms, else: 0
     deadline = System.monotonic_time(:millisecond) + window + @grace_ms

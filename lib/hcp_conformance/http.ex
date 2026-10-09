@@ -164,14 +164,12 @@ defmodule HcpConformance.HTTP do
     URI.to_string(%{uri | query: URI.encode_query(merged)})
   end
 
+  # Req keeps response headers as a map of lowercase-insensitive names to value lists.
   defp flatten_headers(headers) when is_map(headers) do
     Enum.flat_map(headers, fn {name, values} ->
       Enum.map(List.wrap(values), &{String.downcase(name), &1})
     end)
   end
-
-  defp flatten_headers(headers) when is_list(headers),
-    do: Enum.map(headers, fn {name, value} -> {String.downcase(name), value} end)
 
   defp content_type(headers) do
     Enum.find_value(headers, fn

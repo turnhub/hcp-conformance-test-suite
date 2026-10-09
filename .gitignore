@@ -38,3 +38,6 @@ npm-debug.log
 
 # Reports written by --json runs
 /reports/
+
+# Dialyzer PLTs, built by mix dialyzer and cached in CI
+/priv/plts/

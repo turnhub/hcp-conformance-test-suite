@@ -10,7 +10,17 @@ defmodule HcpConformance.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
-      compilers: [:phoenix_live_view] ++ Mix.compilers(),
+      # Boundary fails the build when a module calls across a boundary its
+      # owner does not declare; see the `use Boundary` lines.
+      compilers: [:boundary, :phoenix_live_view] ++ Mix.compilers(),
+      boundary: [default: [check: [aliases: true]]],
+      dialyzer: [
+        plt_local_path: "priv/plts",
+        plt_core_path: "priv/plts",
+        # MDEx renders docs at compile time only, so it is not in the release.
+        plt_add_apps: [:mix, :ex_unit, :mdex],
+        flags: [:error_handling, :extra_return, :missing_return]
+      ],
       listeners: [Phoenix.CodeReloader],
       releases: [hcp_conformance: [include_executables_for: [:unix]]]
     ]
@@ -68,7 +78,10 @@ defmodule HcpConformance.MixProject do
       {:bandit, "~> 1.5"},
       # Renders docs/*.md into pages at compile time.
       {:mdex, "~> 0.14", runtime: false},
-      {:req, "~> 0.5"}
+      {:req, "~> 0.5"},
+      {:boundary, "~> 0.11", runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
   end
 
@@ -88,7 +101,15 @@ defmodule HcpConformance.MixProject do
         "esbuild hcp_conformance --minify",
         "phx.digest"
       ],
-      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
+      # The static guardrails, cheapest first: Boundary runs inside compile.
+      precommit: [
+        "compile --warnings-as-errors",
+        "deps.unlock --unused",
+        "format",
+        "credo --strict",
+        "test",
+        "dialyzer"
+      ]
     ]
   end
 end

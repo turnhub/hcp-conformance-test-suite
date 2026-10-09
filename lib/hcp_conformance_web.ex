@@ -17,6 +17,10 @@ defmodule HcpConformanceWeb do
   those modules here.
   """
 
+  use Boundary,
+    deps: [HcpConformance, HcpConformance.Reference],
+    exports: [Endpoint, Telemetry]
+
   def static_paths, do: ~w(assets fonts images favicon.ico robots.txt)
 
   def router do
@@ -83,8 +87,8 @@ defmodule HcpConformanceWeb do
       import HcpConformanceWeb.CoreComponents
 
       # Common modules used in templates
-      alias Phoenix.LiveView.JS
       alias HcpConformanceWeb.Layouts
+      alias Phoenix.LiveView.JS
 
       # Routes generation with the ~p sigil
       unquote(verified_routes())

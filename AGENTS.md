@@ -3,6 +3,11 @@ This is a web application written using the Phoenix web framework.
 ## Project guidelines
 
 - Use `mix precommit` alias when you are done with all changes and fix any pending issues
+- **Test first.** Write or change the test that pins the behaviour, watch it fail, then change the code. A refactor starts from tests that pass and must keep them passing; if the behaviour it touches has no test, add a characterization test before moving anything.
+- **Static guardrails** run in `mix precommit` and in CI, and every one must pass:
+  - **Boundary** (inside `mix compile`): `HcpConformance` (the suite), `HcpConformance.Reference` (the reference implementation), `HcpConformanceWeb` and `HcpConformance.Application` each declare their `deps` and `exports` with `use Boundary`. The reference shares no code with the suite, so a check is never proven against itself. Calling across a boundary means declaring it, never working around it.
+  - **Credo** `--strict`: fix the finding (split the function, name the predicate) rather than raising a threshold or disabling the check.
+  - **Dialyzer** (PLTs in `priv/plts`, cached in CI): give private functions a `@spec` when Dialyzer needs it; do not add ignore files.
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
 
 ### Phoenix v1.8 guidelines
