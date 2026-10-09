@@ -1,8 +1,14 @@
 defmodule HcpConformance.UnitTest do
   use ExUnit.Case, async: true
 
-  alias HcpConformance.Checks.{Audit, Grants}
-  alias HcpConformance.{Config, Envelope, TargetGuard}
+  alias HcpConformance.Assert
+  alias HcpConformance.Checks.Audit
+  alias HcpConformance.Checks.Grants
+  alias HcpConformance.Config
+  alias HcpConformance.Envelope
+  alias HcpConformance.HTTP.Response
+  alias HcpConformance.TargetGuard
+  alias HcpConformance.Transcript
 
   @entry %{
     "@context" => Envelope.context(),
@@ -82,6 +88,22 @@ defmodule HcpConformance.UnitTest do
 
       assert Envelope.path("grouped", ["record", "provenance", "source"]) ==
                "record.provenance.source"
+    end
+  end
+
+  describe "messages quoting a response body" do
+    test "quote text as it is, cut to a length" do
+      assert Transcript.excerpt("héllo wörld", 5) == "héllo"
+      assert Assert.body_hint(%Response{body: "not found"}) == " (body: not found)"
+    end
+
+    test "describe a body that is not UTF-8 instead of quoting it, so a report can always print" do
+      gzip = :zlib.gzip("{}")
+
+      assert Transcript.excerpt(gzip, 300) == "[binary body, #{byte_size(gzip)} bytes]"
+
+      assert Assert.body_hint(%Response{body: gzip}) ==
+               " (body: [binary body, #{byte_size(gzip)} bytes])"
     end
   end
 

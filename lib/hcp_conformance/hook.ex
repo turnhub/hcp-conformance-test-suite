@@ -10,7 +10,7 @@ defmodule HcpConformance.Hook do
   own act, and dispose of the subject.
   """
 
-  alias HcpConformance.HTTP
+  alias HcpConformance.{HTTP, Transcript}
 
   @doc "Creates a fresh subject. Returns `%{subject_id, subject_did, person_token}`."
   @spec create_subject(pid(), boolean(), String.t(), String.t()) ::
@@ -30,7 +30,7 @@ defmodule HcpConformance.Hook do
         {:ok, %{subject_id: id, subject_did: body["subjectDid"], person_token: token}}
 
       %{status: status, body: body} ->
-        {:error, "POST /subjects answered #{status}: #{String.slice(body, 0, 300)}"}
+        {:error, "POST /subjects answered #{status}: #{Transcript.excerpt(body, 300)}"}
     end
   end
 
@@ -61,7 +61,8 @@ defmodule HcpConformance.Hook do
          }}
 
       %{status: status, body: body} ->
-        {:error, "POST /subjects/{id}/grants answered #{status}: #{String.slice(body, 0, 300)}"}
+        {:error,
+         "POST /subjects/{id}/grants answered #{status}: #{Transcript.excerpt(body, 300)}"}
     end
   end
 

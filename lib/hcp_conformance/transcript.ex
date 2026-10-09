@@ -119,6 +119,15 @@ defmodule HcpConformance.Transcript do
 
   defp binary_note(body), do: "[binary body, #{byte_size(body)} bytes]"
 
+  @doc """
+  The start of a body, for quoting in a message: the first `length` characters of
+  text, or a note for a body that is not UTF-8, so a report can always be printed.
+  """
+  @spec excerpt(binary(), non_neg_integer()) :: String.t()
+  def excerpt(body, length) do
+    if String.valid?(body), do: String.slice(body, 0, length), else: binary_note(body)
+  end
+
   defp redact_exchange(exchange, secrets) do
     exchange
     |> Map.update(:url, nil, &redact_string(&1, secrets))

@@ -5,7 +5,7 @@ defmodule HcpConformance.Assert do
   without the code.
   """
 
-  alias HcpConformance.{Failure, HTTP.Response, Skip}
+  alias HcpConformance.{Failure, HTTP.Response, Skip, Transcript}
 
   @spec fail!(String.t()) :: no_return()
   def fail!(message), do: raise(Failure, message: message)
@@ -77,7 +77,7 @@ defmodule HcpConformance.Assert do
 
   @spec body_hint(Response.t()) :: String.t()
   def body_hint(%Response{body: body}) when is_binary(body) and body != "" do
-    " (body: " <> String.slice(body, 0, 300) <> ")"
+    " (body: " <> Transcript.excerpt(body, 300) <> ")"
   end
 
   def body_hint(_response), do: ""

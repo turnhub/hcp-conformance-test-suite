@@ -199,6 +199,10 @@ docker run -p 4000:4000 \
   hcp-conformance
 ```
 
+**Cloudflare** (a Container behind a Worker, on workers.dev): see
+[`cloudflare/README.md`](cloudflare/README.md). It deploys with `npm run deploy` or on every push
+to `main` through Workers Builds, and needs the Workers Paid plan.
+
 **Fly.io**: `fly.toml` is included. Set `app` and `PHX_HOST`, run
 `fly secrets set SECRET_KEY_BASE=…`, then `fly deploy`.
 
