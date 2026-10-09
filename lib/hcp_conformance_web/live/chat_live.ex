@@ -510,9 +510,15 @@ defmodule HcpConformanceWeb.ChatLive do
           <details class="collapse collapse-arrow bg-base-100">
             <summary class="collapse-title">Search settings</summary>
             <div class="collapse-content space-y-2">
+              <.input
+                field={@form[:query]}
+                label="Search the vault for (blank: the message itself)"
+                placeholder="running shoes"
+              />
               <fieldset class="fieldset">
                 <legend class="fieldset-legend">
-                  Categories to search (none ticked: those the grant can read)
+                  Search beyond the grant: tick categories to send instead of the ones the grant
+                  can read (the vault refuses any it does not cover)
                 </legend>
                 <label :for={category <- @categories} class="label">
                   <input
@@ -579,34 +585,54 @@ defmodule HcpConformanceWeb.ChatLive do
   defp context(%{context: :no_grant} = assigns),
     do: ~H"{@name} holds no grant: nothing was asked of the vault."
 
-  defp context(%{context: {:refused, _refusal}} = assigns) do
+  defp context(%{context: {:refused, refusal, search}} = assigns) do
+    assigns = assign(assigns, refusal: refusal, search: search)
+
     ~H"""
-    The vault refused {@name}: {elem(@context, 1).status} {elem(@context, 1).type}: {elem(@context, 1).detail}.
+    <.searched name={@name} search={@search} />
+    The vault refused {@name}: {@refusal.status} {@refusal.type}: {@refusal.detail}.
     It answered without memories.
     """
   end
 
-  defp context(%{context: {:ok, []}} = assigns),
-    do: ~H"{@name} searched the vault: no memory matched, so none was sent."
+  defp context(%{context: {:ok, [], search}} = assigns) do
+    assigns = assign(assigns, search: search)
 
-  defp context(assigns) do
     ~H"""
+    <.searched name={@name} search={@search} />
+    <span :if={@search.method == "lexical"}>
+      The vault's search is lexical, and no memory shares a word with the query, so none was sent.
+    </span>
+    <span :if={@search.method != "lexical"}>No memory matched, so none was sent.</span>
+    """
+  end
+
+  defp context(%{context: {:ok, entries, search}} = assigns) do
+    assigns = assign(assigns, entries: entries, search: search)
+
+    ~H"""
+    <.searched name={@name} search={@search} />
     <details class="collapse collapse-arrow bg-base-100">
       <summary class="collapse-title">
-        Sent from the vault: {length(elem(@context, 1))} {plural(
-          length(elem(@context, 1)),
-          "memory",
-          "memories"
-        )}
+        Sent from the vault: {length(@entries)} {plural(length(@entries), "memory", "memories")}
       </summary>
       <ul class="collapse-content list">
-        <li :for={entry <- elem(@context, 1)} class="list-row">
+        <li :for={entry <- @entries} class="list-row">
           <div>
             {Vault.preference(entry)} <span class="badge badge-sm">{Vault.category(entry)}</span>
           </div>
         </li>
       </ul>
     </details>
+    """
+  end
+
+  attr :name, :string, required: true
+  attr :search, :map, required: true
+
+  defp searched(assigns) do
+    ~H"""
+    {@name} searched {Enum.join(@search.categories, ", ")} for “{@search.query}”.
     """
   end
 
@@ -886,19 +912,26 @@ defmodule HcpConformanceWeb.ChatLive do
     {reply, assistant.name, context, call, fresh}
   end
 
-  defp sent({:ok, entries}), do: entries
+  defp sent({:ok, entries, _searched}), do: entries
   defp sent(_context), do: []
 
   defp recall(_vault, _assistant, _grant, _query, false = _use_vault, _search), do: {:off, nil}
   defp recall(_vault, _assistant, nil = _grant, _query, true, _search), do: {:no_grant, nil}
 
-  defp recall(vault, assistant, grant, query, true, search) do
-    {result, exchanges} = Vault.traced(vault, fn -> Vault.recall(vault, grant, query, search) end)
+  defp recall(vault, assistant, grant, message, true, search) do
+    query = search[:query] || message
+    categories = search[:categories] || Vault.readable(grant)
+    searched = %{query: query, categories: categories, method: Vault.minimization(vault)}
+
+    {result, exchanges} =
+      Vault.traced(vault, fn ->
+        Vault.recall(vault, grant, query, Keyword.put(search, :categories, categories))
+      end)
 
     context =
       case result do
-        {:ok, entries} -> {:ok, entries}
-        {:error, refusal} -> {:refused, refusal}
+        {:ok, entries} -> {:ok, entries, searched}
+        {:error, refusal} -> {:refused, refusal, searched}
       end
 
     {context, {"#{assistant.name} searched the vault", result, exchanges}}
@@ -914,6 +947,7 @@ defmodule HcpConformanceWeb.ChatLive do
 
   defp search_opts(params) do
     [
+      query: non_empty(String.trim(params["query"] || "")),
       categories: non_empty(params["categories"]),
       max_entries: integer(params["max_entries"], 5),
       detail: params["detail"],

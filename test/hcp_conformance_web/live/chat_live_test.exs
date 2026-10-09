@@ -161,6 +161,10 @@ defmodule HcpConformanceWeb.ChatLiveTest do
     ask(view, "chatgpt", "Which running shoes should I buy?")
 
     assert last_context(view) =~ @shoes
+
+    assert last_context(view) =~
+             "searched general_preferences for “Which running shoes should I buy?”"
+
     assert has_element?(view, "#calls details:first-child", "ChatGPT searched the vault")
     assert has_element?(view, "#calls details:first-child", "/v1/preferences/search")
     assert has_element?(view, "#audit", "preference.read")
@@ -186,12 +190,43 @@ defmodule HcpConformanceWeb.ChatLiveTest do
     refute instructions =~ @shoes
   end
 
+  test "when nothing matches, the reply says why: the vault's search is lexical", %{conn: conn} do
+    view = ready(conn)
+    remember(view, %{text: @shoes})
+    grant(view, "chatgpt")
+
+    ask(view, "chatgpt", "What do you know about me?")
+
+    context = last_context(view)
+    assert context =~ "searched general_preferences for “What do you know about me?”"
+    assert context =~ "no memory shares a word with the query"
+    assert context =~ "lexical"
+  end
+
+  test "the person can set what the vault is searched for", %{conn: conn} do
+    view = ready(conn)
+    remember(view, %{text: @shoes})
+    grant(view, "chatgpt")
+
+    ask(view, "chatgpt", "What do you know about me?", %{query: "running shoes"})
+
+    assert last_context(view) =~ "searched general_preferences for “running shoes”"
+    assert last_context(view) =~ @shoes
+
+    assert_received {:assistant_request,
+                     %{body: %{"instructions" => instructions, "input" => input}}}
+
+    assert instructions =~ @shoes
+    assert [%{"content" => "What do you know about me?"}] = input
+  end
+
   test "searching outside the grant is refused by the vault, not by this page", %{conn: conn} do
     view = ready(conn)
     grant(view, "chatgpt")
 
     ask(view, "chatgpt", "What is my diet?", %{categories: ["health_context"]})
 
+    assert last_context(view) =~ "searched health_context for “What is my diet?”"
     assert last_context(view) =~ "The vault refused ChatGPT: 403 scope-denied"
   end
 

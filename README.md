@@ -158,8 +158,13 @@ explicit on the page; nothing is granted implicitly.
    grant, and only what the vault returns is passed on. The reply says exactly
    what happened: the assistant holds no grant, the vault refused it (with the
    status and problem type, for example 401 after a revocation or 403 for a
-   category outside the grant), or which memories were sent. **Search settings**
-   set the categories, the number of memories, full or minimal detail, and the
+   category outside the grant), or which memories were sent, and always names the
+   query and categories searched. The message itself is the query unless **Search
+   settings** say otherwise. The reference implementation's search is lexical (its
+   discovery document says so): a memory comes back only if it shares a word with
+   the query, so "what do you know about me?" finds nothing while "shoes" finds a
+   memory about shoes. Search settings also set categories beyond the grant (which
+   the vault refuses), the number of memories, full or minimal detail, and the
    purpose recorded in the audit log. Untick the vault to send a message with
    nothing from it.
 6. **HCP calls** lists every request the page made to the vault, with the response,

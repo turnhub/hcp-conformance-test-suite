@@ -64,6 +64,14 @@ defmodule HcpConformance.Vault do
   @spec can_issue?(t()) :: boolean()
   def can_issue?(%__MODULE__{context: context}), do: Context.has?(context, :hook)
 
+  @doc "How the vault picks what a search returns (§4.4): lexical, semantic or llm."
+  @spec minimization(t()) :: String.t() | nil
+  def minimization(%__MODULE__{context: %{discovery: %{"minimization_method" => method}}})
+      when is_binary(method),
+      do: method
+
+  def minimization(_vault), do: nil
+
   @doc "The categories the vault supports, from its discovery document."
   @spec categories(t()) :: [String.t()]
   def categories(%__MODULE__{context: %{discovery: %{"supported_categories" => categories}}})
