@@ -66,6 +66,8 @@ defmodule HcpConformance.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:bandit, "~> 1.5"},
+      # Renders docs/*.md into pages at compile time.
+      {:mdex, "~> 0.14", runtime: false},
       {:req, "~> 0.5"}
     ]
   end

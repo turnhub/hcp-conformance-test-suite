@@ -7,7 +7,7 @@ defmodule HcpConformanceWeb.PageController do
 
   @hook_path Path.expand("../../../docs/HOOK.md", __DIR__)
   @external_resource @hook_path
-  @hook File.read!(@hook_path)
+  @hook @hook_path |> File.read!() |> HcpConformanceWeb.Markdown.to_html()
 
   def checks(conn, _params) do
     render(conn, :checks, page_title: "Checks", checks: Catalog.all())
