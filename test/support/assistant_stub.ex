@@ -9,8 +9,12 @@ defmodule HcpConformance.AssistantStub do
 
   import Plug.Conn
 
-  @doc "Starts the stub; returns the base URL to use in place of the provider's `/v1`."
-  @spec start!(pid(), {pos_integer(), map()}) :: String.t()
+  @doc """
+  Starts the stub; returns the base URL to use in place of the provider's `/v1`.
+  `response` is one `{status, body}` for every request, or a function of the
+  decoded request body returning one.
+  """
+  @spec start!(pid(), {pos_integer(), map()} | (map() -> {pos_integer(), map()})) :: String.t()
   def start!(test, response) do
     plug = {__MODULE__, test: test, response: response}
     {:ok, pid} = Bandit.start_link(plug: plug, port: 0, ip: :loopback, startup_log: false)
@@ -72,7 +76,12 @@ defmodule HcpConformance.AssistantStub do
       }
     })
 
-    {status, json} = opts[:response]
+    {status, json} =
+      case opts[:response] do
+        respond when is_function(respond, 1) -> respond.(Jason.decode!(body))
+        response -> response
+      end
+
     conn |> put_resp_content_type("application/json") |> send_resp(status, Jason.encode!(json))
   end
 end

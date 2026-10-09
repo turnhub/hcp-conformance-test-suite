@@ -12,6 +12,28 @@ defmodule HcpConformanceWeb.ChatLiveTest do
   @shoes "I need high arch support in my running shoes."
   @chatgpt_reply "Look for a stability shoe with firm arch support."
   @claude_reply "A stability shoe would suit you."
+  @picked "Shoes, running!"
+
+  defp picking?(body), do: (body["instructions"] || body["system"] || "") =~ "search words"
+
+  # The request that asked for the answer, past any that picked search words.
+  defp answer_request do
+    receive do
+      {:assistant_request, %{body: body} = request} ->
+        if picking?(body), do: answer_request(), else: request
+    after
+      0 -> flunk("no request asked for an answer")
+    end
+  end
+
+  defp picking_request do
+    receive do
+      {:assistant_request, %{body: body} = request} ->
+        if picking?(body), do: request, else: picking_request()
+    after
+      0 -> flunk("no request picked search words")
+    end
+  end
 
   setup do
     previous =
@@ -20,16 +42,25 @@ defmodule HcpConformanceWeb.ChatLiveTest do
         &{&1, Application.get_env(:hcp_conformance, &1)}
       )
 
-    Application.put_env(
-      :hcp_conformance,
-      :openai_base_url,
-      AssistantStub.start!(self(), AssistantStub.reply(@chatgpt_reply))
-    )
+    # Each assistant first picks the search words, then answers.
+    chatgpt = fn body ->
+      if picking?(body),
+        do: AssistantStub.reply(@picked),
+        else: AssistantStub.reply(@chatgpt_reply)
+    end
+
+    claude = fn body ->
+      if picking?(body),
+        do: AssistantStub.claude_reply(@picked),
+        else: AssistantStub.claude_reply(@claude_reply)
+    end
+
+    Application.put_env(:hcp_conformance, :openai_base_url, AssistantStub.start!(self(), chatgpt))
 
     Application.put_env(
       :hcp_conformance,
       :anthropic_base_url,
-      AssistantStub.start!(self(), AssistantStub.claude_reply(@claude_reply))
+      AssistantStub.start!(self(), claude)
     )
 
     on_exit(fn ->
@@ -149,7 +180,7 @@ defmodule HcpConformanceWeb.ChatLiveTest do
 
     assert has_element?(view, "#messages .chat-start", @chatgpt_reply)
     assert last_context(view) =~ "ChatGPT holds no grant"
-    assert_received {:assistant_request, %{body: %{"instructions" => instructions}}}
+    %{body: %{"instructions" => instructions}} = answer_request()
     refute instructions =~ @shoes
   end
 
@@ -163,12 +194,12 @@ defmodule HcpConformanceWeb.ChatLiveTest do
     assert last_context(view) =~ @shoes
 
     assert last_context(view) =~
-             "searched general_preferences for “Which running shoes should I buy?”"
+             "ChatGPT picked the search words “shoes running” and searched general_preferences."
 
     assert has_element?(view, "#calls details:first-child", "ChatGPT searched the vault")
     assert has_element?(view, "#calls details:first-child", "/v1/preferences/search")
     assert has_element?(view, "#audit", "preference.read")
-    assert_received {:assistant_request, %{body: %{"instructions" => instructions}}}
+    %{body: %{"instructions" => instructions}} = answer_request()
     assert instructions =~ @shoes
   end
 
@@ -186,7 +217,7 @@ defmodule HcpConformanceWeb.ChatLiveTest do
     ask(view, "chatgpt", "Which running shoes should I buy?")
 
     assert last_context(view) =~ "The vault refused ChatGPT: 401 invalid-token"
-    assert_received {:assistant_request, %{body: %{"instructions" => instructions}}}
+    %{body: %{"instructions" => instructions}} = answer_request()
     refute instructions =~ @shoes
   end
 
@@ -195,12 +226,69 @@ defmodule HcpConformanceWeb.ChatLiveTest do
     remember(view, %{text: @shoes})
     grant(view, "chatgpt")
 
-    ask(view, "chatgpt", "What do you know about me?")
+    ask(view, "chatgpt", "What do you know about me?", %{pick_words: "false"})
 
     context = last_context(view)
-    assert context =~ "searched general_preferences for “What do you know about me?”"
+
+    assert context =~
+             "searched general_preferences for “What do you know about me?”, the message itself."
+
     assert context =~ "no memory shares a word with the query"
     assert context =~ "lexical"
+  end
+
+  test "for a broad question, the assistant picks the words the vault is searched for", %{
+    conn: conn
+  } do
+    view = ready(conn)
+    remember(view, %{text: @shoes})
+    grant(view, "chatgpt")
+
+    ask(view, "chatgpt", "What do you know about me?")
+
+    assert last_context(view) =~
+             "ChatGPT picked the search words “shoes running” and searched general_preferences."
+
+    assert last_context(view) =~ @shoes
+
+    %{body: %{"instructions" => picking, "input" => asked}} = picking_request()
+    assert picking =~ "lexical"
+    assert picking =~ "general_preferences"
+    refute picking =~ @shoes
+    assert [%{"content" => "What do you know about me?"}] = asked
+
+    %{body: %{"instructions" => answering}} = answer_request()
+    assert answering =~ @shoes
+  end
+
+  test "when the assistant cannot pick words, the message is searched, and the reply says so", %{
+    conn: conn
+  } do
+    failing = fn body ->
+      if picking?(body),
+        do: {500, %{"error" => %{"message" => "overloaded"}}},
+        else: AssistantStub.reply(@chatgpt_reply)
+    end
+
+    Application.put_env(:hcp_conformance, :openai_base_url, AssistantStub.start!(self(), failing))
+    view = ready(conn)
+    remember(view, %{text: @shoes})
+    grant(view, "chatgpt")
+
+    ask(view, "chatgpt", "Which running shoes should I buy?")
+
+    assert last_context(view) =~
+             "ChatGPT could not pick search words (OpenAI answered 500: overloaded), so it searched general_preferences for “Which running shoes should I buy?”, the message itself."
+
+    assert last_context(view) =~ @shoes
+  end
+
+  test "an assistant without a grant is not asked to pick words", %{conn: conn} do
+    view = ready(conn)
+    ask(view, "chatgpt", "What do you know about me?")
+
+    %{body: %{"instructions" => _instructions}} = answer_request()
+    refute_received {:assistant_request, _picking}
   end
 
   test "the person can set what the vault is searched for", %{conn: conn} do
@@ -210,11 +298,12 @@ defmodule HcpConformanceWeb.ChatLiveTest do
 
     ask(view, "chatgpt", "What do you know about me?", %{query: "running shoes"})
 
-    assert last_context(view) =~ "searched general_preferences for “running shoes”"
+    assert last_context(view) =~
+             "searched general_preferences for “running shoes”, the words you set."
+
     assert last_context(view) =~ @shoes
 
-    assert_received {:assistant_request,
-                     %{body: %{"instructions" => instructions, "input" => input}}}
+    %{body: %{"instructions" => instructions, "input" => input}} = answer_request()
 
     assert instructions =~ @shoes
     assert [%{"content" => "What do you know about me?"}] = input
@@ -226,7 +315,7 @@ defmodule HcpConformanceWeb.ChatLiveTest do
 
     ask(view, "chatgpt", "What is my diet?", %{categories: ["health_context"]})
 
-    assert last_context(view) =~ "searched health_context for “What is my diet?”"
+    assert last_context(view) =~ "and searched health_context."
     assert last_context(view) =~ "The vault refused ChatGPT: 403 scope-denied"
   end
 
@@ -273,7 +362,7 @@ defmodule HcpConformanceWeb.ChatLiveTest do
 
     assert has_element?(view, "#messages .chat-start", @claude_reply)
     assert last_context(view) =~ @shoes
-    assert_received {:assistant_request, %{path: "/v1/messages", body: %{"system" => system}}}
+    %{path: "/v1/messages", body: %{"system" => system}} = answer_request()
     assert system =~ @shoes
   end
 

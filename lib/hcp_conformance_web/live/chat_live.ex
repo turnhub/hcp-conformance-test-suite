@@ -511,8 +511,13 @@ defmodule HcpConformanceWeb.ChatLive do
             <summary class="collapse-title">Search settings</summary>
             <div class="collapse-content space-y-2">
               <.input
+                field={@form[:pick_words]}
+                type="checkbox"
+                label="Let the assistant pick the search words (otherwise the message itself is searched)"
+              />
+              <.input
                 field={@form[:query]}
-                label="Search the vault for (blank: the message itself)"
+                label="Or search for these words instead"
                 placeholder="running shoes"
               />
               <fieldset class="fieldset">
@@ -630,9 +635,33 @@ defmodule HcpConformanceWeb.ChatLive do
   attr :name, :string, required: true
   attr :search, :map, required: true
 
+  defp searched(%{search: %{chosen_by: :assistant}} = assigns) do
+    ~H"""
+    {@name} picked the search words “{@search.query}” and searched {Enum.join(
+      @search.categories,
+      ", "
+    )}.
+    """
+  end
+
+  defp searched(%{search: %{chosen_by: :person}} = assigns) do
+    ~H"""
+    {@name} searched {Enum.join(@search.categories, ", ")} for “{@search.query}”, the words you set.
+    """
+  end
+
+  defp searched(%{search: %{pick_error: _error}} = assigns) do
+    ~H"""
+    {@name} could not pick search words ({@search.pick_error}), so it searched {Enum.join(
+      @search.categories,
+      ", "
+    )} for “{@search.query}”, the message itself.
+    """
+  end
+
   defp searched(assigns) do
     ~H"""
-    {@name} searched {Enum.join(@search.categories, ", ")} for “{@search.query}”.
+    {@name} searched {Enum.join(@search.categories, ", ")} for “{@search.query}”, the message itself.
     """
   end
 
@@ -899,7 +928,7 @@ defmodule HcpConformanceWeb.ChatLive do
         ) ::
           {{:ok, String.t()} | {:error, String.t()}, String.t(), term(), tuple() | nil, map()}
   defp answer(vault, assistant, key, grant, messages, use_vault, search) do
-    {context, call} = recall(vault, assistant, grant, List.last(messages).text, use_vault, search)
+    {context, call} = recall(vault, {assistant, key}, grant, messages, use_vault, search)
     entries = sent(context)
 
     reply =
@@ -915,17 +944,22 @@ defmodule HcpConformanceWeb.ChatLive do
   defp sent({:ok, entries, _searched}), do: entries
   defp sent(_context), do: []
 
-  defp recall(_vault, _assistant, _grant, _query, false = _use_vault, _search), do: {:off, nil}
-  defp recall(_vault, _assistant, nil = _grant, _query, true, _search), do: {:no_grant, nil}
+  defp recall(_vault, _assistant, _grant, _messages, false = _use_vault, _search), do: {:off, nil}
+  defp recall(_vault, _assistant, nil = _grant, _messages, true, _search), do: {:no_grant, nil}
 
-  defp recall(vault, assistant, grant, message, true, search) do
-    query = search[:query] || message
+  defp recall(vault, {assistant, _key} = asker, grant, messages, true, search) do
     categories = search[:categories] || Vault.readable(grant)
-    searched = %{query: query, categories: categories, method: Vault.minimization(vault)}
+    method = Vault.minimization(vault)
+
+    searched =
+      Map.merge(
+        %{categories: categories, method: method},
+        query(asker, messages, search, categories, method)
+      )
 
     {result, exchanges} =
       Vault.traced(vault, fn ->
-        Vault.recall(vault, grant, query, Keyword.put(search, :categories, categories))
+        Vault.recall(vault, grant, searched.query, Keyword.put(search, :categories, categories))
       end)
 
     context =
@@ -935,6 +969,33 @@ defmodule HcpConformanceWeb.ChatLive do
       end
 
     {context, {"#{assistant.name} searched the vault", result, exchanges}}
+  end
+
+  # What the vault is searched for: the words the person set, else the words the
+  # assistant picks, else (or when picking fails) the message itself.
+  defp query({assistant, key}, messages, search, categories, method) do
+    message = List.last(messages).text
+
+    cond do
+      search[:query] ->
+        %{query: search[:query], chosen_by: :person}
+
+      search[:pick_words] ->
+        opts = [key: key["key"], model: key["model"]]
+
+        case Assistants.pick_words(
+               assistant,
+               messages,
+               %{categories: categories, method: method},
+               opts
+             ) do
+          {:ok, words} -> %{query: words, chosen_by: :assistant}
+          {:error, error} -> %{query: message, chosen_by: :message, pick_error: error}
+        end
+
+      true ->
+        %{query: message, chosen_by: :message}
+    end
   end
 
   # Helpers --------------------------------------------------------------------------------
@@ -948,6 +1009,7 @@ defmodule HcpConformanceWeb.ChatLive do
   defp search_opts(params) do
     [
       query: non_empty(String.trim(params["query"] || "")),
+      pick_words: params["pick_words"] != "false",
       categories: non_empty(params["categories"]),
       max_entries: integer(params["max_entries"], 5),
       detail: params["detail"],
@@ -1041,8 +1103,16 @@ defmodule HcpConformanceWeb.ChatLive do
   end
 
   defp chat_form(params, use_vault) do
-    defaults = %{"assistant" => nil, "max_entries" => "5", "detail" => "full", "purpose" => ""}
-    kept = Map.take(params || %{}, ["assistant", "max_entries", "detail", "purpose"])
+    defaults = %{
+      "assistant" => nil,
+      "pick_words" => true,
+      "max_entries" => "5",
+      "detail" => "full",
+      "purpose" => ""
+    }
+
+    kept =
+      Map.take(params || %{}, ["assistant", "pick_words", "max_entries", "detail", "purpose"])
 
     to_form(defaults |> Map.merge(kept) |> Map.merge(%{"text" => "", "use_vault" => use_vault}),
       as: :chat
