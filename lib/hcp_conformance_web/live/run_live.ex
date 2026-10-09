@@ -18,6 +18,23 @@ defmodule HcpConformanceWeb.RunLive do
 
   @statuses [:pass, :fail, :warn, :skip, :error, :na]
 
+  @stat_labels [
+    pass: "Passed",
+    fail: "Failed",
+    warn: "Warnings",
+    skip: "Skipped",
+    error: "Errors",
+    na: "N/A"
+  ]
+
+  # Result filters: id, label, and the statuses shown (nil: everything).
+  @filters [
+    {"all", "All", nil},
+    {"not-passed", "Not passed", ["fail", "warn", "error"]},
+    {"passed", "Passed", ["pass"]},
+    {"skipped", "Skipped or N/A", ["skip", "na"]}
+  ]
+
   @impl true
   def mount(_params, %{"connection" => connection}, socket) when is_map(connection) do
     case Runs.config(connection) do
@@ -29,10 +46,14 @@ defmodule HcpConformanceWeb.RunLive do
            connection: connection,
            mode: Config.mode(config),
            groups: Catalog.groups(),
-           form: to_form(%{"groups" => Map.new(Catalog.groups(), &{&1, "true"})}, as: :run)
+           group_counts: group_counts(),
+           total_checks: length(Catalog.all()),
+           stat_labels: @stat_labels,
+           filters: @filters
          )
+         |> select(Catalog.groups())
          |> reset_run()
-         |> stream_configure(:results, dom_id: &("result-" <> String.replace(&1.id, ".", "-")))
+         |> stream_configure(:results, dom_id: &dom_id/1)
          |> stream(:results, [])}
 
       {:error, message} ->
@@ -55,6 +76,8 @@ defmodule HcpConformanceWeb.RunLive do
       # Exchanges of the check (or setup, or teardown) still running, by check
       # id, newest first; they join its row when it finishes.
       pending: %{},
+      # The group of the last result streamed, to divide the list by group.
+      last_group: nil,
       # Setup's exchanges by id, kept for the results that cite them (the
       # discovery checks judge the document setup fetched).
       setup: %{},
@@ -68,103 +91,165 @@ defmodule HcpConformanceWeb.RunLive do
     <Layouts.app flash={@flash}>
       <.header>
         Conformance run
-        <:subtitle>{@connection["target"]} · {@mode} mode</:subtitle>
+        <:subtitle><code class="break-all">{@connection["target"]}</code></:subtitle>
         <:actions>
-          <.button href={~p"/session"} method="delete" id="disconnect">Disconnect</.button>
+          <.button href={~p"/session"} method="delete" id="disconnect" class="btn btn-ghost btn-sm">
+            <.icon name="hero-arrow-left-start-on-rectangle" /> Disconnect
+          </.button>
         </:actions>
       </.header>
 
-      <.form for={@form} id="run-form" phx-submit="run">
-        <fieldset class="fieldset">
-          <legend class="fieldset-legend">Groups</legend>
-          <.input
-            :for={group <- @groups}
-            type="checkbox"
-            id={"group-#{group}"}
-            name={"run[groups][#{group}]"}
-            label={group}
-            value={@form.params["groups"][group]}
-          />
-        </fieldset>
-        <.button variant="primary" id="run" disabled={@running}>
-          {if @running, do: "Running…", else: "Run the suite"}
-        </.button>
-      </.form>
-
-      <div :if={@running} id="progress-card" class="card bg-base-200">
-        <div class="card-body">
-          <p>Ran {@done} of {@total} checks.</p>
-          <p :if={@current} id="current">
-            Now: <code>{@current.check_id}</code>, {requests(@current.requests)} so far.
-          </p>
-          <progress id="progress" class="progress progress-primary" value={@done} max={max(@total, 1)}></progress>
-        </div>
+      <div id="mode" role="alert" class="alert">
+        <span class="badge badge-primary">{@mode} mode</span>
+        <span>{mode_note(@mode)}</span>
       </div>
 
-      <div :if={@report} id="summary" class="card bg-base-200">
+      <.form for={@form} id="run-form" phx-change="select" phx-submit="run" class="card bg-base-200">
         <div class="card-body">
-          <h2 class="card-title">
-            Verdict
-            <span
-              id="verdict"
-              data-verdict={@report.verdict}
-              class={["badge badge-lg", verdict_class(@report.verdict)]}
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="card-title">What to check</h2>
+            <div class="join">
+              <.button
+                type="button"
+                id="select-all"
+                phx-click="select_all"
+                class="btn btn-sm join-item"
+              >
+                All
+              </.button>
+              <.button
+                type="button"
+                id="select-none"
+                phx-click="select_none"
+                class="btn btn-sm join-item"
+              >
+                None
+              </.button>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <label
+              :for={group <- @groups}
+              for={"group-" <> group}
+              class={[
+                "btn btn-sm",
+                if(group in @selected, do: "btn-primary btn-soft", else: "btn-ghost")
+              ]}
             >
-              {String.upcase(@report.verdict)}
-            </span>
-          </h2>
-          <p :if={@report.partial}>Selected checks only: not a conformance claim.</p>
-          <.list>
-            <:item title="MUST">{summary(@report.summary.must)}</:item>
-            <:item title="SHOULD">{summary(@report.summary.should)}</:item>
-            <:item title="Capabilities">{Enum.join(@report.capabilities, ", ")}</:item>
-          </.list>
-          <div class="card-actions">
-            <.button id="download-report" phx-click="download" phx-hook=".Download">
-              <.icon name="hero-arrow-down-tray" /> Download the JSON report
+              <input type="hidden" name={"run[groups][#{group}]"} value="false" />
+              <input
+                type="checkbox"
+                id={"group-" <> group}
+                name={"run[groups][#{group}]"}
+                value="true"
+                checked={group in @selected}
+                class="checkbox checkbox-xs"
+              />
+              {group}
+              <span class="badge badge-sm badge-ghost">{@group_counts[group].checks}</span>
+            </label>
+          </div>
+          <div class="card-actions items-center justify-between">
+            <p id="selection">
+              {@selection.checks} of {@total_checks} checks · {@selection.must} MUST · {@selection.should} SHOULD
+              <span :if={@selection.checks not in [0, @total_checks]}>
+                · not a conformance claim: only a full run is
+              </span>
+            </p>
+            <.button
+              variant="primary"
+              id="run"
+              disabled={@running or @selection.checks == 0}
+              class="btn btn-primary"
+            >
+              <.icon :if={!@running} name="hero-play" />
+              <span :if={@running} class="loading loading-spinner loading-sm"></span>
+              {if @running, do: "Running…", else: "Run the suite"}
             </.button>
           </div>
         </div>
-      </div>
+      </.form>
 
       <div :for={note <- @setup_notes} role="alert" class="alert alert-warning">
         <.icon name="hero-exclamation-triangle" />
         <span>{note}</span>
       </div>
 
-      <div id="results" phx-update="stream" class="space-y-2">
-        <details
-          :for={{dom_id, result} <- @streams.results}
-          id={dom_id}
-          open={result.status in [:fail, :warn, :error]}
-          class="collapse collapse-arrow bg-base-200"
-        >
-          <summary class="collapse-title">
-            <span :if={result.status} class={["badge", status_class(result.status)]}>
-              {status_label(result.status)}
-            </span>
-            <span :if={!result.status} class="badge badge-ghost">{String.upcase(result.id)}</span>
-            <code :if={result.status}>{result.id}</code>
-            <span :if={result.section} class="badge badge-ghost">§{result.section}</span>
-            <span :if={result.level} class="badge badge-ghost">
-              {result.level |> to_string() |> String.upcase()}
-            </span>
-            <span data-role="request-count" class="badge badge-ghost">
-              {requests(length(result.exchanges))}
-            </span>
-            <p>{result.title}</p>
-            <p :if={result.message}>{result.message}</p>
-          </summary>
-          <div class="collapse-content space-y-2">
-            <p :if={result.evidence == :run}>
-              This check judges every response in the run: the requests are in the other rows.
-            </p>
-            <p :if={result.exchanges == [] and result.evidence != :run}>
-              This check made no HTTP requests.
-            </p>
-            <Exchanges.exchange :for={exchange <- result.exchanges} row={dom_id} exchange={exchange} />
+      <div :if={@running or @report} id="summary" class="card bg-base-200">
+        <div class="card-body">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="card-title">
+              <span :if={@running}>Running</span>
+              <span :if={@report}>Verdict</span>
+              <span
+                :if={@report}
+                id="verdict"
+                data-verdict={@report.verdict}
+                class={["badge badge-lg", verdict_class(@report.verdict)]}
+              >
+                {String.upcase(@report.verdict)}
+              </span>
+            </h2>
+            <.button
+              :if={@report}
+              id="download-report"
+              phx-click="download"
+              phx-hook=".Download"
+              class="btn btn-sm"
+            >
+              <.icon name="hero-arrow-down-tray" /> JSON report
+            </.button>
           </div>
-        </details>
+
+          <div :if={@running} id="progress-card">
+            <progress
+              id="progress"
+              class="progress progress-primary"
+              value={@done}
+              max={max(@total, 1)}
+            ></progress>
+            <p>
+              Ran {@done} of {@total} checks.
+              <span :if={@current} id="current">
+                Now <code>{@current.check_id}</code>, {requests(@current.requests)} so far.
+              </span>
+            </p>
+          </div>
+
+          <p :if={@report && @report.partial}>Selected checks only: not a conformance claim.</p>
+
+          <div
+            id="stats"
+            class="stats grid-flow-row grid-cols-3 sm:grid-flow-col sm:grid-cols-none bg-base-100"
+          >
+            <div :for={{status, label} <- @stat_labels} id={"stat-#{status}"} class="stat">
+              <div class="stat-title">{label}</div>
+              <div class="stat-value">{@counts[status]}</div>
+            </div>
+          </div>
+
+          <.list :if={@report}>
+            <:item title="MUST">{summary(@report.summary.must)}</:item>
+            <:item title="SHOULD">{summary(@report.summary.should)}</:item>
+            <:item title="Capabilities">{Enum.join(@report.capabilities, ", ")}</:item>
+          </.list>
+        </div>
+      </div>
+
+      <div :if={@report} id="result-filter" class="join">
+        <.button
+          :for={{id, label, statuses} <- @filters}
+          type="button"
+          id={"filter-" <> id}
+          phx-click={filter(id, statuses)}
+          class={["btn btn-sm join-item", id == "all" && "btn-active"]}
+        >
+          {label}
+        </.button>
+      </div>
+
+      <div id="results" phx-update="stream" class="space-y-2">
+        <.row :for={{dom_id, item} <- @streams.results} id={dom_id} item={item} />
       </div>
 
       <script :type={Phoenix.LiveView.ColocatedHook} name=".Download">
@@ -185,7 +270,69 @@ defmodule HcpConformanceWeb.RunLive do
     """
   end
 
+  attr :id, :string, required: true
+  attr :item, :map, required: true
+
+  defp row(%{item: %{divider: group}} = assigns) do
+    assigns = assign(assigns, group: group)
+
+    ~H"""
+    <div id={@id} class="divider">{@group}</div>
+    """
+  end
+
+  defp row(%{item: result} = assigns) do
+    assigns = assign(assigns, result: result)
+
+    ~H"""
+    <details
+      id={@id}
+      data-status={@result.status || "phase"}
+      open={@result.status in [:fail, :warn, :error]}
+      class="collapse collapse-arrow bg-base-200"
+    >
+      <summary class="collapse-title">
+        <div class="flex flex-wrap items-center gap-2">
+          <span :if={@result.status} class={["badge", status_class(@result.status)]}>
+            {status_label(@result.status)}
+          </span>
+          <span :if={!@result.status} class="badge badge-ghost">{String.upcase(@result.id)}</span>
+          <code :if={@result.status} class="break-all">{@result.id}</code>
+          <span :if={@result.section} class="badge badge-ghost badge-sm">§{@result.section}</span>
+          <span :if={@result.level} class="badge badge-ghost badge-sm">
+            {@result.level |> to_string() |> String.upcase()}
+          </span>
+          <span data-role="request-count" class="badge badge-ghost badge-sm">
+            {requests(length(@result.exchanges))}
+          </span>
+        </div>
+        <p>{@result.title}</p>
+        <p :if={@result.message} role="alert" class="alert alert-soft">{@result.message}</p>
+      </summary>
+      <div class="collapse-content space-y-2">
+        <p :if={@result.evidence == :run}>
+          This check judges every response in the run: the requests are in the other rows.
+        </p>
+        <p :if={@result.exchanges == [] and @result.evidence != :run}>
+          This check made no HTTP requests.
+        </p>
+        <Exchanges.exchange :for={exchange <- @result.exchanges} row={@id} exchange={exchange} />
+      </div>
+    </details>
+    """
+  end
+
   @impl true
+  def handle_event("select", %{"run" => params}, socket) do
+    selected = for {group, "true"} <- params["groups"] || %{}, do: group
+    {:noreply, select(socket, selected)}
+  end
+
+  def handle_event("select_all", _params, socket),
+    do: {:noreply, select(socket, Catalog.groups())}
+
+  def handle_event("select_none", _params, socket), do: {:noreply, select(socket, [])}
+
   def handle_event("run", _params, %{assigns: %{running: true}} = socket), do: {:noreply, socket}
 
   def handle_event("run", params, socket) do
@@ -199,7 +346,7 @@ defmodule HcpConformanceWeb.RunLive do
         {:noreply,
          socket
          |> reset_run()
-         |> assign(running: true, form: to_form(params["run"] || %{}, as: :run))
+         |> assign(running: true)
          |> stream(:results, [], reset: true)
          |> start_async(:run, fn -> Runs.run(config, on_event: on_event) end)}
 
@@ -265,6 +412,7 @@ defmodule HcpConformanceWeb.RunLive do
     {:noreply,
      socket
      |> insert_phases()
+     |> insert_group(result.group)
      |> assign(pending: pending, current: nil)
      |> update(:done, &(&1 + 1))
      |> update(:counts, &Map.update!(&1, result.status, fn count -> count + 1 end))
@@ -332,6 +480,75 @@ defmodule HcpConformanceWeb.RunLive do
       evidence: :own,
       exchanges: exchanges
     }
+  end
+
+  defp select(socket, selected) do
+    counts = socket.assigns.group_counts
+
+    selection =
+      Enum.reduce(selected, %{checks: 0, must: 0, should: 0}, fn group, acc ->
+        Map.merge(acc, counts[group], fn _key, sum, count -> sum + count end)
+      end)
+
+    form =
+      to_form(%{"groups" => Map.new(Catalog.groups(), &{&1, to_string(&1 in selected)})},
+        as: :run
+      )
+
+    assign(socket, selected: selected, selection: selection, form: form)
+  end
+
+  defp group_counts do
+    Catalog.all()
+    |> Enum.group_by(& &1.group)
+    |> Map.new(fn {group, checks} ->
+      {group,
+       %{
+         checks: length(checks),
+         must: Enum.count(checks, &(&1.level == :must)),
+         should: Enum.count(checks, &(&1.level == :should))
+       }}
+    end)
+  end
+
+  defp dom_id(%{divider: group}), do: "divider-" <> group
+  defp dom_id(%{id: id}), do: "result-" <> String.replace(id, ".", "-")
+
+  # A divider goes in before the first result of each group.
+  defp insert_group(%{assigns: %{last_group: group}} = socket, group), do: socket
+
+  defp insert_group(socket, group) do
+    socket
+    |> assign(last_group: group)
+    |> stream_insert(:results, %{divider: group})
+  end
+
+  defp mode_note(:hook),
+    do:
+      "The suite creates a fresh subject through the conformance hook and issues itself the grants each check needs, so every check can run."
+
+  defp mode_note(:static),
+    do:
+      "The suite uses the tokens you gave. Checks that need the hook to issue grants are skipped."
+
+  defp mode_note(:anonymous),
+    do: "No credentials: only checks that need none can run; the rest are skipped."
+
+  # Shows the results with these statuses, client-side; group dividers stay.
+  defp filter(id, statuses) do
+    js =
+      JS.remove_class("btn-active", to: "#result-filter .btn")
+      |> JS.add_class("btn-active", to: "#filter-" <> id)
+
+    case statuses do
+      nil ->
+        JS.show(js, to: "#results > [data-status]")
+
+      statuses ->
+        js
+        |> JS.hide(to: "#results > [data-status]")
+        |> JS.show(to: Enum.map_join(statuses, ", ", &"#results > [data-status=#{&1}]"))
+    end
   end
 
   defp requests(1), do: "1 request"

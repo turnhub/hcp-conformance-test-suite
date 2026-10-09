@@ -29,6 +29,49 @@ defmodule HcpConformanceWeb.RunLiveTest do
     assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/run")
   end
 
+  test "the page says what the connection's mode means for the run", %{conn: conn} do
+    {:ok, view, _html} = live(connected(conn), ~p"/run")
+
+    assert has_element?(view, "#mode .badge", "hook mode")
+    assert has_element?(view, "#mode", "fresh subject")
+  end
+
+  test "choosing groups shows how many checks will run; with none chosen, nothing can run", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(connected(conn), ~p"/run")
+    assert has_element?(view, "#selection", "94 of 94 checks · 90 MUST · 4 SHOULD")
+    assert has_element?(view, "label[for=group-discovery]", "10")
+
+    view |> form("#run-form", run: %{groups: only(["discovery"])}) |> render_change()
+    assert has_element?(view, "#selection", "10 of 94 checks · 9 MUST · 1 SHOULD")
+    assert has_element?(view, "#selection", "not a conformance claim")
+
+    view |> element("#select-none") |> render_click()
+    assert has_element?(view, "#selection", "0 of 94 checks")
+    assert has_element?(view, "#run[disabled]")
+
+    view |> element("#select-all") |> render_click()
+    assert has_element?(view, "#selection", "94 of 94 checks")
+    refute has_element?(view, "#run[disabled]")
+  end
+
+  test "stats count results by status, and results are divided by group with a filter", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(connected(conn), ~p"/run")
+
+    view |> form("#run-form", run: %{groups: only(["discovery", "transport"])}) |> render_submit()
+    render_async(view, 60_000)
+
+    assert view |> element("#stat-pass .stat-value") |> render() =~ "14"
+    assert view |> element("#stat-fail .stat-value") |> render() =~ "0"
+    assert has_element?(view, "#results #divider-discovery", "discovery")
+    assert has_element?(view, "#results #divider-transport", "transport")
+    assert has_element?(view, "#result-discovery-served[data-status=pass]")
+    assert has_element?(view, "#result-filter #filter-not-passed")
+  end
+
   test "a full run against the reference implementation passes", %{conn: conn} do
     {:ok, view, _html} = live(connected(conn), ~p"/run")
 
