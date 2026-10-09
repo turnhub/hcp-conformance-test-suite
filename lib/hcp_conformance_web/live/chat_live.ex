@@ -27,7 +27,7 @@ defmodule HcpConformanceWeb.ChatLive do
   use HcpConformanceWeb, :live_view
 
   alias HcpConformance.{Assistants, Runs, Vault}
-  alias HcpConformanceWeb.Exchanges
+  alias HcpConformanceWeb.{Exchanges, Markdown}
 
   @max_calls 25
   @max_audit 60
@@ -573,7 +573,10 @@ defmodule HcpConformanceWeb.ChatLive do
     ~H"""
     <div class="chat chat-start">
       <div class="chat-header">{@message.name}</div>
-      <div class={["chat-bubble", @message[:error] && "chat-bubble-error"]}>{@message.text}</div>
+      <div :if={@message[:html]} class="chat-bubble space-y-2">{raw(@message.html)}</div>
+      <div :if={!@message[:html]} class={["chat-bubble", @message[:error] && "chat-bubble-error"]}>
+        {@message.text}
+      </div>
       <div class="chat-footer" data-role="context">
         <.context name={@message.name} context={@message.context} />
       </div>
@@ -878,7 +881,14 @@ defmodule HcpConformanceWeb.ChatLive do
     message =
       case reply do
         {:ok, text} ->
-          %{role: "assistant", name: name, text: text, context: context}
+          # The text goes back in the conversation; the HTML is what shows.
+          %{
+            role: "assistant",
+            name: name,
+            text: text,
+            html: Markdown.reply_to_html(text),
+            context: context
+          }
 
         {:error, error} ->
           %{role: "assistant", name: name, text: error, context: context, error: true}

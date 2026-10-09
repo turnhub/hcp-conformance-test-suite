@@ -30,6 +30,7 @@ exists for.
 | Checks | 94 (see [docs/CHECKS.md](docs/CHECKS.md)) |
 | Transports | RESTful HTTP in full; MCP manifest only |
 | Built with | Elixir 1.17+, Phoenix 1.8 and LiveView, daisyUI; no database |
+| Guardrails | Boundary, Credo (strict), Dialyzer and the test suite, locally (`mix precommit`) and in GitHub Actions |
 
 ## Contents
 
@@ -48,15 +49,31 @@ exists for.
 ### Hosted
 
 Open the hosted instance and connect: give the HCP base URL and either the
-conformance hook (a full run) or existing tokens (a partial run). Then pick the
-groups and press **Run the suite**. Results stream in as each check finishes,
-and each one expands to the HTTP requests behind it: method and path, status,
+conformance hook (a full run) or existing tokens (a partial run). The run page
+says which mode that gives and what it means for the run.
+
+**What to check.** Each group is a toggle with its number of checks; **All** and
+**None** set them all. The page counts what the selection covers (checks, MUST
+and SHOULD) and says when it is not a conformance claim, which is anything short
+of every group. Press **Run the suite**.
+
+**Results.** While the run goes, a progress bar counts checks, the check running
+now is named with its requests so far, and the stats count passed, failed,
+warnings, skipped, errors and N/A. Results land in a collapsible section per
+group, the same groups as the toggles, each headed with its counts by status. A
+group opens when one of its results did not pass, and so does that result; groups
+that passed stay folded. Opening or folding a section is yours to change while
+results keep arriving.
+
+Each result expands to the HTTP requests behind it: method and path, status,
 time taken, and, expanded again, the request and response headers and bodies
-(JSON pretty-printed). A result that did not pass opens on its requests. The
-discovery checks show the discovery request made during setup, which is what they
-judge. Setup and teardown traffic (discovery, the hook subject and grants) has
-rows of its own, in the order it happened. While a check runs, the progress card
-names it and counts its requests. The full report downloads as JSON.
+(JSON pretty-printed). The discovery checks show the discovery request made
+during setup, which is what they judge. Setup and teardown traffic (discovery,
+the hook subject and grants) has rows of its own above the groups.
+
+When the run ends, the summary shows the **verdict**, the MUST and SHOULD counts
+and the target's capabilities, filters narrow the results to those not passed,
+passed, or skipped, and the full report downloads as JSON.
 
 Credentials are redacted everywhere: in the results, the report and the requests
 shown with them. That covers the suite's bearer tokens, the hook secret, the tokens the hook hands
@@ -142,8 +159,9 @@ explicit on the page; nothing is granted implicitly.
 1. Connect to a target as for a run, with the conformance hook (**Use the reference
    implementation** works). The page connects as the person, in a fresh subject,
    and issues **no grant**.
-2. Give an API key for ChatGPT (OpenAI), Claude (Anthropic), or both. Each is a
-   separate HCP client with grants of its own.
+2. Give an API key for ChatGPT (OpenAI), Claude (Anthropic), or both, and
+   optionally a model (`gpt-5.4-mini` and `claude-opus-5-5` by default). Each
+   assistant is a separate HCP client with grants of its own.
 3. **Grants.** Issue a grant to an assistant: which categories, read and/or write,
    temporary (with an expiry) or persistent, and optionally narrowed to particular
    memories (§4.1.5.1). The conformance hook stands in for the vault's consent
@@ -155,11 +173,13 @@ explicit on the page; nothing is granted implicitly.
    something the person declared on the same dimension is quarantined as
    conflicted (§2.6) and is not recalled. **Export** downloads the vault as JSON.
 5. **Chat.** Each message is searched in the vault with the chosen assistant's own
-   grant, and only what the vault returns is passed on. The reply says exactly
-   what happened: the assistant holds no grant, the vault refused it (with the
-   status and problem type, for example 401 after a revocation or 403 for a
-   category outside the grant), or which memories were sent, and always names the
-   query and categories searched. By default the assistant picks the search words
+   grant, and only what the vault returns is passed on. Under each reply, a list
+   says exactly what happened. Its first row is the search: who chose the words
+   (the assistant, you, or the message itself), each word, and the categories
+   searched. Its second is the outcome: the assistant holds no grant, the vault
+   refused it (with the status and problem type, for example 401 after a
+   revocation or 403 for a category outside the grant), nothing matched and why,
+   or the memories sent. By default the assistant picks the search words
    first, in a separate call: it is told how the vault searches and which
    categories its grant covers, never what is in the vault. That matters because
    the reference implementation's search is lexical (its discovery document says
@@ -170,6 +190,12 @@ explicit on the page; nothing is granted implicitly.
    the grant (which the vault refuses), and set the number of memories, full or
    minimal detail, and the purpose recorded in the audit log. Untick the vault to
    send a message with nothing from it.
+
+   Replies are rendered as Markdown, warily: they come from a vendor that saw the
+   person's memories. Raw HTML shows as text, links to scripts are dropped, and
+   images are never loaded (an image shows as its description), since a browser
+   fetches an image without asking and its URL could carry recalled memories to
+   another host.
 6. **HCP calls** lists every request the page made to the vault, with the response,
    credentials redacted. The **Audit log** shows what the vault recorded, newest
    first: grants issued and revoked, reads with their purpose, writes, conflicts.
@@ -324,11 +350,21 @@ over `Hcp.issue_grant` and `Tokens.generate`.
 
 ```bash
 mix setup
-mix test           # 74 tests, about 10 seconds; no network beyond localhost
-mix precommit      # what CI runs: compile with warnings as errors (Boundary included),
-                   # unused deps, format, credo --strict, tests, dialyzer
+mix test           # about 130 tests, 10 seconds; no network beyond localhost
+mix precommit      # compile with warnings as errors (Boundary included), unused deps,
+                   # format, credo --strict, tests, dialyzer
 mix hcp.checks > docs/CHECKS.md    # after adding or changing a check; a test enforces it
 ```
+
+**Guardrails.** Boundary fails the build when a module reaches across a boundary
+it does not declare: the suite (`HcpConformance`), the reference implementation
+(`HcpConformance.Reference`) and the web app (`HcpConformanceWeb`) only call each
+other through their exports. Credo runs strict, Dialyzer checks the typespecs,
+and new behaviour starts as a failing test. GitHub Actions
+(`.github/workflows/ci.yml`) runs each guardrail as its own check on every push to
+`main` and every pull request: formatting, Credo, Dialyzer, the tests on Elixir
+1.18 and 1.20, and a smoke test that builds the release image and runs the suite
+from it against its own reference implementation.
 
 The test endpoint listens on port 4002, so the LiveView and API tests run real
 suites against the reference implementation the app serves.
@@ -359,8 +395,10 @@ Layout:
 | `lib/hcp_conformance/envelope.ex` | The §2.2 envelope rules, in either form |
 | `lib/hcp_conformance/reference/` | The reference HCP implementation and its conformance hook |
 | `lib/hcp_conformance/runs.ex`, `settings.ex` | Starting runs from the web, the concurrency cap, deployment settings |
-| `lib/hcp_conformance_web/` | The Phoenix app: connect page, run LiveView, API, reference mount |
-| `docs/HOOK.md`, `docs/CHECKS.md` | The hook protocol and the check catalogue |
+| `lib/hcp_conformance/vault.ex`, `assistants.ex`, `open_ai.ex`, `anthropic.ex` | The chat page's vault client (grants, memories, recall, audit, export) and the assistants it talks to |
+| `lib/hcp_conformance_web/` | The Phoenix app: connect page, run and chat LiveViews, API, reference mount |
+| `lib/hcp_conformance_web/exchanges.ex`, `markdown.ex` | The HTTP exchange component both pages show; Markdown for docs pages and replies |
+| `docs/HOOK.md`, `docs/CHECKS.md` | The hook protocol (also served at `/hook`) and the check catalogue (`/checks` lists the same checks) |
 
 ## Known limits
 

@@ -384,6 +384,23 @@ defmodule HcpConformanceWeb.ChatLiveTest do
     assert system =~ @shoes
   end
 
+  test "a reply's Markdown is rendered, and its raw HTML shown as text", %{conn: conn} do
+    reply = fn body ->
+      if picking?(body),
+        do: AssistantStub.reply(@picked),
+        else: AssistantStub.reply("You have **a snotty nose**. <b>Rest</b>.")
+    end
+
+    Application.put_env(:hcp_conformance, :openai_base_url, AssistantStub.start!(self(), reply))
+    view = ready(conn)
+
+    ask(view, "chatgpt", "Do I have a cold?")
+
+    assert has_element?(view, "#messages .chat-start .chat-bubble strong", "a snotty nose")
+    refute has_element?(view, "#messages .chat-start .chat-bubble b")
+    assert has_element?(view, "#messages .chat-start .chat-bubble", "<b>Rest</b>")
+  end
+
   test "with the vault off, nothing is asked of it", %{conn: conn} do
     view = ready(conn)
     remember(view, %{text: @shoes})

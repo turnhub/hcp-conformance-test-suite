@@ -17,8 +17,7 @@ defmodule HcpConformance.MixProject do
       dialyzer: [
         plt_local_path: "priv/plts",
         plt_core_path: "priv/plts",
-        # MDEx renders docs at compile time only, so it is not in the release.
-        plt_add_apps: [:mix, :ex_unit, :mdex],
+        plt_add_apps: [:mix, :ex_unit],
         flags: [:error_handling, :extra_return, :missing_return]
       ],
       listeners: [Phoenix.CodeReloader],
@@ -76,8 +75,8 @@ defmodule HcpConformance.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:bandit, "~> 1.5"},
-      # Renders docs/*.md into pages at compile time.
-      {:mdex, "~> 0.14", runtime: false},
+      # Renders docs/*.md into pages at compile time, and chat replies.
+      {:mdex, "~> 0.14"},
       {:req, "~> 0.5"},
       {:boundary, "~> 0.11", runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
