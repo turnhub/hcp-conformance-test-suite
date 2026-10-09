@@ -1,0 +1,7 @@
+_build
+deps
+test
+cover
+reports
+*.ez
+hcp_conformance

@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: elixir:1.18
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: mix-${{ hashFiles('mix.lock') }}
+      - run: mix local.hex --force && mix local.rebar --force
+      - run: mix deps.get
+      - run: mix format --check-formatted
+      - run: mix compile --warnings-as-errors
+      - run: mix test
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t hcp-conformance .
+      - name: Smoke test the image against its own reference implementation
+        run: |
+          docker run -d --name hcpc -p 4000:4000 -e PUBLIC_URL=http://127.0.0.1:4000 -e ALLOW_PRIVATE_TARGETS=true hcp-conformance
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:4000/health && break; sleep 1; done
+          docker run --rm --network host hcp-conformance bin/conformance \
+            --target http://127.0.0.1:4000/reference \
+            --hook-url http://127.0.0.1:4000/reference/conformance-hook \
+            --hook-secret reference-hook-secret --allow-private --strict

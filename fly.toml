@@ -1,0 +1,33 @@
+# Fly.io deployment for the hosted runner. Runs are kept in memory, so run one
+# machine: `fly deploy` then `fly scale count 1`.
+app = "hcp-conformance"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  SERVE = "true"
+  PORT = "4000"
+  PUBLIC_URL = "https://hcp-conformance.fly.dev"
+  ALLOW_PRIVATE_TARGETS = "false"
+  MAX_CONCURRENT_RUNS = "4"
+  REFERENCE_SERVER = "true"
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/health"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+
+[[vm]]
+  memory = "512mb"
+  cpus = 1
