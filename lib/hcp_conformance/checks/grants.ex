@@ -128,16 +128,18 @@ defmodule HcpConformance.Checks.Grants do
 
     [
       {is_binary(grant["grantId"]), "grantId must be a string"},
-      {is_map(grant["client"]) and is_binary(grant["client"]["id"]), "client.id must be a string"},
-      {is_map(grant["client"]) and is_binary(grant["client"]["name"]) and grant["client"]["name"] != "",
-       "client.name must be a name the person can recognize"},
+      {is_map(grant["client"]) and is_binary(grant["client"]["id"]),
+       "client.id must be a string"},
+      {is_map(grant["client"]) and is_binary(grant["client"]["name"]) and
+         grant["client"]["name"] != "", "client.name must be a name the person can recognize"},
       {is_list(scopes) and scopes != [] and Enum.all?(scopes, &scope?/1),
        "scopes must be hcp:{category}:{read|write} strings, no wildcards"},
       {type in @grant_types, "grantType must be temporary or persistent"},
       {Envelope.iso8601?(grant["issuedAt"]), "issuedAt must be ISO-8601"},
       {type != "temporary" or Envelope.iso8601?(grant["expiresAt"]),
        "a temporary grant must carry a non-null expiresAt"},
-      {type != "persistent" or is_nil(grant["expiresAt"]), "a persistent grant must carry a null expiresAt"},
+      {type != "persistent" or is_nil(grant["expiresAt"]),
+       "a persistent grant must carry a null expiresAt"},
       {grant["status"] in @statuses, "status must be active, revoked or expired"},
       {is_nil(restrictions) or
          (is_list(restrictions) and
@@ -178,7 +180,11 @@ defmodule HcpConformance.Checks.Grants do
   defp client_sees_own(ctx) do
     agent = Context.agent!(ctx)
     grants = list!(ctx, agent.token)
-    Assert.check!(length(grants) == 1, "a client must see exactly its own grant, got #{length(grants)}")
+
+    Assert.check!(
+      length(grants) == 1,
+      "a client must see exactly its own grant, got #{length(grants)}"
+    )
 
     if agent.grant_id do
       Assert.check!(
@@ -192,7 +198,11 @@ defmodule HcpConformance.Checks.Grants do
     first = Context.issue_grant!(ctx, scopes: Context.scopes(ctx.primary_category, ["read"]))
     second = Context.issue_grant!(ctx, scopes: Context.scopes(ctx.primary_category, ["read"]))
     seen = ctx |> list!(first.token) |> Enum.map(& &1["grantId"])
-    Assert.check!(second.grant_id not in seen, "one client's grant list disclosed another client's grant")
+
+    Assert.check!(
+      second.grant_id not in seen,
+      "one client's grant list disclosed another client's grant"
+    )
   end
 
   defp find_grant!(ctx, grant_id, params \\ []) do
@@ -212,7 +222,10 @@ defmodule HcpConformance.Checks.Grants do
 
   defp temporary_bounds(ctx) do
     issued =
-      Context.issue_grant!(ctx, scopes: Context.scopes(ctx.primary_category, ["read"]), expires_in: 3600)
+      Context.issue_grant!(ctx,
+        scopes: Context.scopes(ctx.primary_category, ["read"]),
+        expires_in: 3600
+      )
 
     grant = find_grant!(ctx, issued.grant_id)
 
@@ -239,7 +252,11 @@ defmodule HcpConformance.Checks.Grants do
     grant = find_grant!(ctx, issued.grant_id)
 
     [event | _] =
-      AuditLog.await!(ctx, "grant.issued", &AuditLog.event?(&1, "grant.issued", grantId: issued.grant_id))
+      AuditLog.await!(
+        ctx,
+        "grant.issued",
+        &AuditLog.event?(&1, "grant.issued", grantId: issued.grant_id)
+      )
 
     minute = String.slice(grant["expiresAt"] || "", 0, 16)
 
@@ -289,9 +306,19 @@ defmodule HcpConformance.Checks.Grants do
   defp revocation_audited(ctx) do
     grant = Context.issue_grant!(ctx, scopes: Context.scopes(ctx.primary_category, ["read"]))
     revoke!(ctx, grant.grant_id)
-    AuditLog.await!(ctx, "grant.revoked", &AuditLog.event?(&1, "grant.revoked", grantId: grant.grant_id))
+
+    AuditLog.await!(
+      ctx,
+      "grant.revoked",
+      &AuditLog.event?(&1, "grant.revoked", grantId: grant.grant_id)
+    )
+
     revoked = find_grant!(ctx, grant.grant_id, status: "revoked")
-    Assert.check!(revoked["status"] == "revoked", "the revoked grant reads as #{inspect(revoked["status"])}")
+
+    Assert.check!(
+      revoked["status"] == "revoked",
+      "the revoked grant reads as #{inspect(revoked["status"])}"
+    )
   end
 
   defp revoke_person_only(ctx) do
@@ -302,7 +329,12 @@ defmodule HcpConformance.Checks.Grants do
   end
 
   defp expiry(ctx) do
-    grant = Context.issue_grant!(ctx, scopes: Context.scopes(ctx.primary_category, ["read"]), expires_in: 2)
+    grant =
+      Context.issue_grant!(ctx,
+        scopes: Context.scopes(ctx.primary_category, ["read"]),
+        expires_in: 2
+      )
+
     Process.sleep(3_500)
 
     response =
@@ -316,7 +348,12 @@ defmodule HcpConformance.Checks.Grants do
       )
 
     Assert.status!(response, [401, 403], "a request under a lapsed temporary grant")
-    AuditLog.await!(ctx, "grant.expired", &AuditLog.event?(&1, "grant.expired", grantId: grant.grant_id))
+
+    AuditLog.await!(
+      ctx,
+      "grant.expired",
+      &AuditLog.event?(&1, "grant.expired", grantId: grant.grant_id)
+    )
   end
 
   defp read_only(ctx) do
@@ -342,8 +379,11 @@ defmodule HcpConformance.Checks.Grants do
 
     grant =
       case Context.issue_grant(ctx, scopes: [scope], restrictions: restriction) do
-        {:ok, grant} -> grant
-        {:error, message} -> Assert.skip!("the conformance hook does not issue narrowed grants: " <> message)
+        {:ok, grant} ->
+          grant
+
+        {:error, message} ->
+          Assert.skip!("the conformance hook does not issue narrowed grants: " <> message)
       end
 
     [object] = list!(ctx, grant.token)
@@ -361,7 +401,10 @@ defmodule HcpConformance.Checks.Grants do
       "the search returned an entry outside the grant's restrictions (Rule 4)"
     )
 
-    Assert.check!(allowed["id"] in returned, "the search did not return the entry the grant is narrowed to")
+    Assert.check!(
+      allowed["id"] in returned,
+      "the search did not return the entry the grant is narrowed to"
+    )
 
     Fixtures.get(ctx, grant.token, excluded["id"])
     |> Assert.problem!(403, "scope-denied", "reading an entry outside the grant's restrictions")

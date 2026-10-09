@@ -88,7 +88,10 @@ defmodule HcpConformance.Checks.Transport do
 
   defp invalid_token(ctx) do
     token = "hcp-conformance-forged-" <> Context.random_word(24)
-    response = Context.request(ctx, :post, Context.url(ctx, :search), token: token, json: search_body(ctx))
+
+    response =
+      Context.request(ctx, :post, Context.url(ctx, :search), token: token, json: search_body(ctx))
+
     Assert.problem!(response, 401, "invalid-token", "search with a forged token")
   end
 

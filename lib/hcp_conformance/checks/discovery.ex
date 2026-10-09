@@ -142,12 +142,15 @@ defmodule HcpConformance.Checks.Discovery do
 
     problems =
       [
-        {doc["hcp_version"] == "1.0", "hcp_version must be \"1.0\", got #{inspect(doc["hcp_version"])}"},
-        {doc["conformance_level"] in @levels, "conformance_level must be one of #{inspect(@levels)}"},
+        {doc["hcp_version"] == "1.0",
+         "hcp_version must be \"1.0\", got #{inspect(doc["hcp_version"])}"},
+        {doc["conformance_level"] in @levels,
+         "conformance_level must be one of #{inspect(@levels)}"},
         {doc["authorization_profile"] in @profiles,
          "authorization_profile must be one of #{inspect(@profiles)}"},
         {doc["envelope_form"] in @forms, "envelope_form must be one of #{inspect(@forms)}"},
-        {doc["minimization_method"] in @methods, "minimization_method must be one of #{inspect(@methods)}"},
+        {doc["minimization_method"] in @methods,
+         "minimization_method must be one of #{inspect(@methods)}"},
         {is_list(transports) and transports != [] and Enum.all?(transports, &(&1 in @transports)),
          "supported_transports must be a non-empty subset of #{inspect(@transports)}"},
         {doc["problem_type_base"] == "https://hcp.me/problems/",
@@ -163,7 +166,11 @@ defmodule HcpConformance.Checks.Discovery do
 
   defp categories(ctx) do
     categories = discovery!(ctx)["supported_categories"]
-    Assert.check!(is_list(categories) and categories != [], "supported_categories must be a non-empty array")
+
+    Assert.check!(
+      is_list(categories) and categories != [],
+      "supported_categories must be a non-empty array"
+    )
 
     unknown =
       Enum.reject(categories, fn category ->
@@ -206,14 +213,18 @@ defmodule HcpConformance.Checks.Discovery do
     if "rest" not in List.wrap(doc["supported_transports"]),
       do: Assert.not_applicable!("the REST transport is not offered")
 
-    Assert.check!(get_in(doc, ["pagination", "audit"]) == "cursor", "pagination.audit must be \"cursor\"")
+    Assert.check!(
+      get_in(doc, ["pagination", "audit"]) == "cursor",
+      "pagination.audit must be \"cursor\""
+    )
   end
 
   defp profile(ctx) do
     doc = discovery!(ctx)
 
     Assert.check!(
-      not (doc["authorization_profile"] == "first-party" and doc["conformance_level"] == "HCP-v1-Interop"),
+      not (doc["authorization_profile"] == "first-party" and
+             doc["conformance_level"] == "HCP-v1-Interop"),
       "a first-party implementation is not eligible for HCP v1 Interop"
     )
   end

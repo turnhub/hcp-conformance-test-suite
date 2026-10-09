@@ -21,7 +21,9 @@ defmodule HcpConformance.ReferenceConformanceTest do
 
   test "static mode: no failures, and checks needing the hook are skipped", %{target: target} do
     token = ReferenceTarget.person_token!(target)
-    {:ok, report} = HcpConformance.run(%{target: target.base, person_token: token, allow_private: true})
+
+    {:ok, report} =
+      HcpConformance.run(%{target: target.base, person_token: token, allow_private: true})
 
     assert ReferenceTarget.failures(report) == ""
     assert %{verdict: "incomplete"} = report
@@ -36,7 +38,10 @@ defmodule HcpConformance.ReferenceConformanceTest do
 
     assert ReferenceTarget.failures(report) == ""
     assert %{status: :pass} = Enum.find(report.results, &(&1.id == "discovery.required_members"))
-    assert %{status: :pass} = Enum.find(report.results, &(&1.id == "transport.unsupported_version"))
+
+    assert %{status: :pass} =
+             Enum.find(report.results, &(&1.id == "transport.unsupported_version"))
+
     assert %{verdict: "incomplete"} = report
   end
 

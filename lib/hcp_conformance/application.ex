@@ -1,28 +1,34 @@
 defmodule HcpConformance.Application do
-  @moduledoc """
-  Starts the run supervisor and run store always, and the web server with its
-  reference implementation when `serve` is set (the default for releases).
-  """
+  # See https://elixir.hexdocs.pm/Application.html
+  # for more information on OTP Applications
+  @moduledoc false
 
   use Application
 
-  @impl Application
+  @impl true
   def start(_type, _args) do
-    serve = Application.get_env(:hcp_conformance, :serve, false)
+    children = [
+      HcpConformanceWeb.Telemetry,
+      {Phoenix.PubSub, name: HcpConformance.PubSub},
+      # Each running suite registers here, so the number running at once can be capped.
+      {Registry, keys: :duplicate, name: HcpConformance.RunRegistry},
+      # The reference HCP implementation served at /reference keeps its synthetic
+      # subjects in memory.
+      {HcpConformance.Reference.Store, name: HcpConformance.Reference.DefaultStore},
+      HcpConformanceWeb.Endpoint
+    ]
 
-    children =
-      [
-        {Task.Supervisor, name: HcpConformance.RunSupervisor},
-        HcpConformance.Web.RunStore,
-        {HcpConformance.Reference.Store, name: HcpConformance.Reference.DefaultStore}
-      ] ++
-        if serve do
-          port = Application.get_env(:hcp_conformance, :port, 4000)
-          [{Bandit, plug: HcpConformance.Web.Endpoint, port: port, ip: {0, 0, 0, 0}}]
-        else
-          []
-        end
+    # See https://elixir.hexdocs.pm/Supervisor.html
+    # for other strategies and supported options
+    opts = [strategy: :one_for_one, name: HcpConformance.Supervisor]
+    Supervisor.start_link(children, opts)
+  end
 
-    Supervisor.start_link(children, strategy: :one_for_one, name: HcpConformance.Supervisor)
+  # Tell Phoenix to update the endpoint configuration
+  # whenever the application is updated.
+  @impl true
+  def config_change(changed, _new, removed) do
+    HcpConformanceWeb.Endpoint.config_change(changed, removed)
+    :ok
   end
 end

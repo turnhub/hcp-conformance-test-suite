@@ -29,7 +29,9 @@ defmodule HcpConformance.Assert do
     if status in expected do
       response
     else
-      fail!("#{what}: expected HTTP #{Enum.join(expected, " or ")}, got #{status}#{body_hint(response)}")
+      fail!(
+        "#{what}: expected HTTP #{Enum.join(expected, " or ")}, got #{status}#{body_hint(response)}"
+      )
     end
   end
 

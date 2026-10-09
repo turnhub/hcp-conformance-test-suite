@@ -98,7 +98,10 @@ defmodule HcpConformance.Checks.Idempotency do
       "the replay created a different entry (#{first["id"]} then #{second["id"]})"
     )
 
-    Assert.check!(version.(second) == version.(first), "the replay returned a different record.version")
+    Assert.check!(
+      version.(second) == version.(first),
+      "the replay returned a different record.version"
+    )
   end
 
   # A replay that ignored the key creates a second entry, so the events of both
@@ -130,7 +133,13 @@ defmodule HcpConformance.Checks.Idempotency do
 
     Context.track_entry(ctx, first["id"])
     response = post(ctx, key, Fixtures.entry_body(ctx))
-    Assert.problem!(response, 409, "idempotency-conflict", "POST reusing a key with a different body")
+
+    Assert.problem!(
+      response,
+      409,
+      "idempotency-conflict",
+      "POST reusing a key with a different body"
+    )
   end
 
   defp put(ctx, id, key, text) do
@@ -148,7 +157,9 @@ defmodule HcpConformance.Checks.Idempotency do
     version = &Envelope.get(&1, ctx.envelope_form, ["record", "version"])
 
     first =
-      put(ctx, entry["id"], key, text) |> Assert.status!(200, "first PUT") |> Assert.json_object!("first PUT")
+      put(ctx, entry["id"], key, text)
+      |> Assert.status!(200, "first PUT")
+      |> Assert.json_object!("first PUT")
 
     second =
       put(ctx, entry["id"], key, text)
@@ -171,9 +182,18 @@ defmodule HcpConformance.Checks.Idempotency do
   defp put_conflict(ctx) do
     entry = Fixtures.create!(ctx, Context.person!(ctx))
     key = key()
-    put(ctx, entry["id"], key, "First " <> Context.unique_word(ctx)) |> Assert.status!(200, "first PUT")
+
+    put(ctx, entry["id"], key, "First " <> Context.unique_word(ctx))
+    |> Assert.status!(200, "first PUT")
+
     response = put(ctx, entry["id"], key, "Different " <> Context.unique_word(ctx))
-    Assert.problem!(response, 409, "idempotency-conflict", "PUT reusing a key with a different body")
+
+    Assert.problem!(
+      response,
+      409,
+      "idempotency-conflict",
+      "PUT reusing a key with a different body"
+    )
   end
 
   defp delete_key(ctx) do

@@ -15,7 +15,12 @@ defmodule HcpConformance.Checks.Export do
     person = [requires: [:rest, :person]]
 
     [
-      Check.new("export.agents_refused", "3.3.5", :must, "Agents cannot export", &agents_refused/1,
+      Check.new(
+        "export.agents_refused",
+        "3.3.5",
+        :must,
+        "Agents cannot export",
+        &agents_refused/1,
         requires: [:rest, :agent]
       ),
       Check.new(
@@ -63,7 +68,10 @@ defmodule HcpConformance.Checks.Export do
 
   defp export!(ctx, params \\ []) do
     response =
-      Context.request(ctx, :get, Context.url(ctx, :export), token: Context.person!(ctx), params: params)
+      Context.request(ctx, :get, Context.url(ctx, :export),
+        token: Context.person!(ctx),
+        params: params
+      )
 
     Assert.status!(response, 200, "GET /v1/export")
     Assert.json_object!(response, "GET /v1/export")
@@ -74,7 +82,8 @@ defmodule HcpConformance.Checks.Export do
   defp objects(body, match) do
     case body do
       map when is_map(map) ->
-        if(match.(map), do: [map], else: []) ++ Enum.flat_map(Map.values(map), &objects(&1, match))
+        if(match.(map), do: [map], else: []) ++
+          Enum.flat_map(Map.values(map), &objects(&1, match))
 
       list when is_list(list) ->
         Enum.flat_map(list, &objects(&1, match))
@@ -87,7 +96,9 @@ defmodule HcpConformance.Checks.Export do
   defp contains_entry?(body, id), do: objects(body, &(&1["id"] == id)) != []
 
   defp agents_refused(ctx) do
-    response = Context.request(ctx, :get, Context.url(ctx, :export), token: Context.agent!(ctx).token)
+    response =
+      Context.request(ctx, :get, Context.url(ctx, :export), token: Context.agent!(ctx).token)
+
     Assert.refused!(response, "an agent exporting")
   end
 
@@ -105,8 +116,16 @@ defmodule HcpConformance.Checks.Export do
     {active, soft, hard} = three_entries!(ctx)
     body = export!(ctx)
     Assert.check!(contains_entry?(body, active["id"]), "the export omits an active entry")
-    Assert.check!(contains_entry?(body, soft["id"]), "the default export omits a soft-deleted entry")
-    Assert.check!(not contains_entry?(body, hard["id"]), "the export contains a hard-deleted entry")
+
+    Assert.check!(
+      contains_entry?(body, soft["id"]),
+      "the default export omits a soft-deleted entry"
+    )
+
+    Assert.check!(
+      not contains_entry?(body, hard["id"]),
+      "the export contains a hard-deleted entry"
+    )
   end
 
   defp exclude_deleted(ctx) do
@@ -119,7 +138,10 @@ defmodule HcpConformance.Checks.Export do
       "exclude=deleted still contains a soft-deleted entry"
     )
 
-    Assert.check!(not contains_entry?(body, hard["id"]), "the export contains a hard-deleted entry")
+    Assert.check!(
+      not contains_entry?(body, hard["id"]),
+      "the export contains a hard-deleted entry"
+    )
   end
 
   defp include_versions(ctx) do
@@ -153,9 +175,13 @@ defmodule HcpConformance.Checks.Export do
     events =
       AuditLog.await!(ctx, "preference.exported", fn event ->
         AuditLog.event?(event, "preference.exported") and is_binary(event["detail"]) and
-          String.contains?(event["detail"], "audit") and String.contains?(event["detail"], "versions")
+          String.contains?(event["detail"], "audit") and
+          String.contains?(event["detail"], "versions")
       end)
 
-    Assert.check!(events != [], "no preference.exported event records the parameters include=audit,versions")
+    Assert.check!(
+      events != [],
+      "no preference.exported event records the parameters include=audit,versions"
+    )
   end
 end

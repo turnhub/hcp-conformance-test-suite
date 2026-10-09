@@ -39,7 +39,11 @@ defmodule HcpConformance.Runner do
 
     notify.(
       {:started,
-       %{total: length(checks), capabilities: MapSet.to_list(ctx.capabilities), setup_notes: ctx.setup_notes}}
+       %{
+         total: length(checks),
+         capabilities: MapSet.to_list(ctx.capabilities),
+         setup_notes: ctx.setup_notes
+       }}
     )
 
     main_results = Enum.map(main, &run_and_notify(ctx, &1, notify))
@@ -129,7 +133,9 @@ defmodule HcpConformance.Runner do
       {:error, "transport error: " <> error.message}
 
     error ->
-      {:error, ("suite error: " <> Exception.format(:error, error, __STACKTRACE__)) |> String.slice(0, 1_500)}
+      {:error,
+       ("suite error: " <> Exception.format(:error, error, __STACKTRACE__))
+       |> String.slice(0, 1_500)}
   end
 
   defp describe(missing) do

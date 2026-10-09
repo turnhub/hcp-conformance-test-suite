@@ -32,7 +32,8 @@ defmodule HcpConformance.Transcript do
         }
 
   @spec start_link(keyword()) :: Agent.on_start()
-  def start_link(_opts \\ []), do: Agent.start_link(fn -> %{exchanges: [], secrets: [], next_id: 1} end)
+  def start_link(_opts \\ []),
+    do: Agent.start_link(fn -> %{exchanges: [], secrets: [], next_id: 1} end)
 
   @doc "Registers a value to redact from everything recorded from now on, and from what is already stored."
   @spec add_secret(pid(), String.t() | nil) :: :ok
@@ -42,7 +43,12 @@ defmodule HcpConformance.Transcript do
   def add_secret(pid, secret) do
     Agent.update(pid, fn state ->
       secrets = Enum.uniq([secret | state.secrets])
-      %{state | secrets: secrets, exchanges: Enum.map(state.exchanges, &redact_exchange(&1, [secret]))}
+
+      %{
+        state
+        | secrets: secrets,
+          exchanges: Enum.map(state.exchanges, &redact_exchange(&1, [secret]))
+      }
     end)
   end
 
@@ -81,10 +87,14 @@ defmodule HcpConformance.Transcript do
     |> Map.update(:request_body, nil, &redact_string(&1, secrets))
     |> Map.update(:response_body, nil, &redact_string(&1, secrets))
     |> Map.update(:error, nil, &redact_string(&1, secrets))
-    |> Map.update(:request_headers, [], fn headers -> Enum.map(headers, &redact_header(&1, secrets)) end)
+    |> Map.update(:request_headers, [], fn headers ->
+      Enum.map(headers, &redact_header(&1, secrets))
+    end)
   end
 
-  defp redact_header({name, _value}, _secrets) when name in ["authorization"], do: {name, "Bearer [redacted]"}
+  defp redact_header({name, _value}, _secrets) when name in ["authorization"],
+    do: {name, "Bearer [redacted]"}
+
   defp redact_header({name, value}, secrets), do: {name, redact_string(value, secrets)}
 
   defp redact_string(nil, _secrets), do: nil

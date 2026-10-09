@@ -1,0 +1,16 @@
+<Layouts.app flash={@flash}>
+  <.header>
+    Checks
+    <:subtitle>{length(@checks)} checks against HCP v1 1.0-draft-4.</:subtitle>
+  </.header>
+
+  <div class="overflow-x-auto">
+    <.table id="checks" rows={@checks} row_id={&"check-#{&1.id}"}>
+      <:col :let={check} label="Check"><code>{check.id}</code></:col>
+      <:col :let={check} label="Section">§{check.section}</:col>
+      <:col :let={check} label="Level">{check.level |> to_string() |> String.upcase()}</:col>
+      <:col :let={check} label="Requirement">{check.title}</:col>
+      <:col :let={check} label="Needs">{needs(check.requires)}</:col>
+    </.table>
+  </div>
+</Layouts.app>

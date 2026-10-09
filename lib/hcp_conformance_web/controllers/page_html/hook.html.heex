@@ -1,0 +1,14 @@
+<Layouts.app flash={@flash}>
+  <.header>
+    Conformance hook
+    <:subtitle>
+      The three calls an implementation exposes so the suite can create test subjects and grants.
+    </:subtitle>
+  </.header>
+
+  <div class="card bg-base-200">
+    <div class="card-body">
+      <pre id="hook-spec" class="whitespace-pre-wrap">{@hook}</pre>
+    </div>
+  </div>
+</Layouts.app>

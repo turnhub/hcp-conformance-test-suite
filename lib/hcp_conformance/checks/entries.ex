@@ -216,7 +216,8 @@ defmodule HcpConformance.Checks.Entries do
     )
 
     Assert.check!(
-      field.(["record", "provenance", "source"]) == "conversation-id:hcp-conformance-" <> ctx.nonce,
+      field.(["record", "provenance", "source"]) ==
+        "conversation-id:hcp-conformance-" <> ctx.nonce,
       "record.provenance.source (client-assigned) was not stored as sent"
     )
   end
@@ -233,7 +234,8 @@ defmodule HcpConformance.Checks.Entries do
     case ctx.envelope_form do
       "grouped" ->
         Assert.check!(
-          is_map(entry["claim"]) and is_map(entry["record"]) and not Map.has_key?(entry, "category"),
+          is_map(entry["claim"]) and is_map(entry["record"]) and
+            not Map.has_key?(entry, "category"),
           "the declared form is grouped, but the entry does not carry claim and record objects"
         )
 
@@ -252,18 +254,25 @@ defmodule HcpConformance.Checks.Entries do
       Fixtures.entry_body(ctx, declaration_type: "model-inferred", confidence: nil)
       |> drop_confidence(ctx.envelope_form)
 
-    response = Context.request(ctx, :post, Context.url(ctx, :preferences), token: writer(ctx), json: body)
+    response =
+      Context.request(ctx, :post, Context.url(ctx, :preferences), token: writer(ctx), json: body)
+
     Assert.problem!(response, 422, "malformed-request", "model-inferred entry without confidence")
   end
 
   defp drop_confidence(body, "flat"), do: Map.delete(body, "confidence")
-  defp drop_confidence(body, _grouped), do: update_in(body, ["record"], &Map.delete(&1, "confidence"))
+
+  defp drop_confidence(body, _grouped),
+    do: update_in(body, ["record"], &Map.delete(&1, "confidence"))
 
   defp confidence_only_inferred(ctx) do
     body = Fixtures.entry_body(ctx, declaration_type: "user-declared", confidence: "high")
 
     response =
-      Context.request(ctx, :post, Context.url(ctx, :preferences), token: Context.person!(ctx), json: body)
+      Context.request(ctx, :post, Context.url(ctx, :preferences),
+        token: Context.person!(ctx),
+        json: body
+      )
 
     Assert.problem!(response, 422, "malformed-request", "user-declared entry with confidence")
   end
@@ -273,7 +282,10 @@ defmodule HcpConformance.Checks.Entries do
       body = Fixtures.entry_body(ctx, drop: [path])
 
       response =
-        Context.request(ctx, :post, Context.url(ctx, :preferences), token: Context.person!(ctx), json: body)
+        Context.request(ctx, :post, Context.url(ctx, :preferences),
+          token: Context.person!(ctx),
+          json: body
+        )
 
       Assert.problem!(response, 422, "malformed-request", "entry without #{Enum.join(path, ".")}")
     end
@@ -302,7 +314,11 @@ defmodule HcpConformance.Checks.Entries do
     )
 
     Assert.check!(is_binary(body["retrievalId"]), "the body must carry a retrievalId")
-    Assert.check!(Envelope.iso8601?(body["timestamp"]), "the body must carry an ISO-8601 timestamp")
+
+    Assert.check!(
+      Envelope.iso8601?(body["timestamp"]),
+      "the body must carry an ISO-8601 timestamp"
+    )
 
     Assert.check!(
       is_map(body["minimization"]) and is_binary(body["minimization"]["method"]) and
@@ -360,9 +376,18 @@ defmodule HcpConformance.Checks.Entries do
     )
 
     Assert.check!(field.(["record", "previousVersion"]) == 1, "record.previousVersion must be 1")
-    Assert.check!(field.(["claim", "subject", "preference"]) == text, "the updated statement was not stored")
+
+    Assert.check!(
+      field.(["claim", "subject", "preference"]) == text,
+      "the updated statement was not stored"
+    )
+
     violations = Envelope.validate(updated, ctx.envelope_form)
-    Assert.check!(violations == [], "the updated entry is invalid: " <> Enum.join(violations, "; "))
+
+    Assert.check!(
+      violations == [],
+      "the updated entry is invalid: " <> Enum.join(violations, "; ")
+    )
   end
 
   defp get_version(ctx) do
@@ -400,7 +425,9 @@ defmodule HcpConformance.Checks.Entries do
 
   @spec delete!(Context.t(), String.t(), String.t(), keyword()) :: map()
   def delete!(ctx, token, id, params \\ []) do
-    response = Context.request(ctx, :delete, Context.entry_url(ctx, id), token: token, params: params)
+    response =
+      Context.request(ctx, :delete, Context.entry_url(ctx, id), token: token, params: params)
+
     Assert.status!(response, 200, "DELETE /v1/preferences/{id}")
     Assert.json_object!(response, "DELETE /v1/preferences/{id}")
   end
@@ -413,7 +440,11 @@ defmodule HcpConformance.Checks.Entries do
     Assert.check!(body["entryId"] == entry["id"], "the response must name the entryId")
     Assert.check!(body["status"] == "deleted", "the response status must be \"deleted\"")
     Assert.check!(body["hardDeleted"] == false, "hardDeleted must be false for a soft delete")
-    Assert.check!(Envelope.iso8601?(body["timestamp"]), "the response must carry an ISO-8601 timestamp")
+
+    Assert.check!(
+      Envelope.iso8601?(body["timestamp"]),
+      "the response must carry an ISO-8601 timestamp"
+    )
   end
 
   defp soft_delete_audited(ctx) do
@@ -472,6 +503,8 @@ defmodule HcpConformance.Checks.Entries do
   def uuid4 do
     <<a::48, _::4, b::12, _::2, c::62>> = :crypto.strong_rand_bytes(16)
     <<u0::32, u1::16, u2::16, u3::16, u4::48>> = <<a::48, 4::4, b::12, 2::2, c::62>>
-    :io_lib.format("~8.16.0b-~4.16.0b-~4.16.0b-~4.16.0b-~12.16.0b", [u0, u1, u2, u3, u4]) |> to_string()
+
+    :io_lib.format("~8.16.0b-~4.16.0b-~4.16.0b-~4.16.0b-~12.16.0b", [u0, u1, u2, u3, u4])
+    |> to_string()
   end
 end

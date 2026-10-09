@@ -43,7 +43,10 @@ defmodule HcpConformance.UnitTest do
 
     test "accepts the same entry in the flat form" do
       flat =
-        @entry |> Map.drop(["claim", "record"]) |> Map.merge(@entry["claim"]) |> Map.merge(@entry["record"])
+        @entry
+        |> Map.drop(["claim", "record"])
+        |> Map.merge(@entry["claim"])
+        |> Map.merge(@entry["record"])
 
       assert Envelope.validate(flat, "flat") == []
     end
@@ -63,8 +66,12 @@ defmodule HcpConformance.UnitTest do
     end
 
     test "accepts redacted provenance only when asked to" do
-      redacted = update_in(@entry, ["record", "provenance"], &Map.drop(&1, ["source", "capturedBy"]))
-      assert ["record.provenance.source must be a string"] = Envelope.validate(redacted, "grouped")
+      redacted =
+        update_in(@entry, ["record", "provenance"], &Map.drop(&1, ["source", "capturedBy"]))
+
+      assert ["record.provenance.source must be a string"] =
+               Envelope.validate(redacted, "grouped")
+
       assert Envelope.validate(redacted, "grouped", redacted: true) == []
     end
 
@@ -72,7 +79,9 @@ defmodule HcpConformance.UnitTest do
       assert Envelope.get(@entry, "grouped", ["record", "status"]) == "active"
       assert Envelope.get(%{"status" => "active"}, "flat", ["record", "status"]) == "active"
       assert Envelope.path("flat", ["record", "provenance", "source"]) == "provenance.source"
-      assert Envelope.path("grouped", ["record", "provenance", "source"]) == "record.provenance.source"
+
+      assert Envelope.path("grouped", ["record", "provenance", "source"]) ==
+               "record.provenance.source"
     end
   end
 
@@ -149,13 +158,18 @@ defmodule HcpConformance.UnitTest do
       assert Config.mode(config) == :hook
       assert {:ok, config} = Config.new(%{target: "https://vault.example.com", person_token: "t"})
       assert Config.mode(config) == :static
-      assert {:ok, config} = Config.new(%{target: "https://vault.example.com", person_token: "  "})
+
+      assert {:ok, config} =
+               Config.new(%{target: "https://vault.example.com", person_token: "  "})
+
       assert Config.mode(config) == :anonymous
     end
 
     test "derives the target from a discovery URL" do
       assert {:ok, %{target: "https://vault.example.com/apps/1"}} =
-               Config.new(%{discovery_url: "https://vault.example.com/apps/1/.well-known/hcp-configuration"})
+               Config.new(%{
+                 discovery_url: "https://vault.example.com/apps/1/.well-known/hcp-configuration"
+               })
     end
 
     test "rejects what cannot run" do
@@ -163,7 +177,10 @@ defmodule HcpConformance.UnitTest do
       assert {:error, _message} = Config.new(%{target: "ftp://vault.example.com"})
 
       assert {:error, _message} =
-               Config.new(%{target: "https://vault.example.com", hook_url: "https://vault.example.com/hook"})
+               Config.new(%{
+                 target: "https://vault.example.com",
+                 hook_url: "https://vault.example.com/hook"
+               })
     end
 
     test "public/1 carries no credentials" do

@@ -12,7 +12,10 @@ defmodule HcpConformance.Reference.Store do
 
   @spec start_link(keyword()) :: Agent.on_start()
   def start_link(opts \\ []) do
-    Agent.start_link(fn -> %{subjects: %{}, tokens: %{}, order: []} end, Keyword.take(opts, [:name]))
+    Agent.start_link(
+      fn -> %{subjects: %{}, tokens: %{}, order: []} end,
+      Keyword.take(opts, [:name])
+    )
   end
 
   @doc "Runs `fun` on the state atomically; `fun` returns `{reply, new_state}`."
@@ -35,7 +38,8 @@ defmodule HcpConformance.Reference.Store do
   @doc "Removes a subject and every token routing to it."
   @spec drop_subject(map(), String.t()) :: map()
   def drop_subject(state, subject_id) do
-    tokens = state.tokens |> Enum.reject(fn {_token, {id, _kind}} -> id == subject_id end) |> Map.new()
+    tokens =
+      state.tokens |> Enum.reject(fn {_token, {id, _kind}} -> id == subject_id end) |> Map.new()
 
     %{
       state

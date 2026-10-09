@@ -63,7 +63,8 @@ defmodule HcpConformance.TargetGuard do
   @spec private?(:inet.ip_address()) :: boolean()
   def private?({a, b, _c, _d}) do
     a == 0 or a == 10 or a == 127 or (a == 100 and (b &&& 0xC0) == 64) or (a == 169 and b == 254) or
-      (a == 172 and b in 16..31) or (a == 192 and b == 168) or (a == 198 and b in 18..19) or a >= 224
+      (a == 172 and b in 16..31) or (a == 192 and b == 168) or (a == 198 and b in 18..19) or
+      a >= 224
   end
 
   def private?({0, 0, 0, 0, 0, 0, 0, _last} = _loopback_or_unspecified), do: true

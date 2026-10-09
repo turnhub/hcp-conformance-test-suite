@@ -71,7 +71,10 @@ defmodule HcpConformance.Checks.Audit do
 
   defp page!(ctx, params) do
     response =
-      Context.request(ctx, :get, Context.url(ctx, :audit), token: Context.person!(ctx), params: params)
+      Context.request(ctx, :get, Context.url(ctx, :audit),
+        token: Context.person!(ctx),
+        params: params
+      )
 
     Assert.status!(response, 200, "GET /v1/audit")
     body = Assert.json_object!(response, "GET /v1/audit")
@@ -84,7 +87,9 @@ defmodule HcpConformance.Checks.Audit do
   end
 
   defp agents_refused(ctx) do
-    response = Context.request(ctx, :get, Context.url(ctx, :audit), token: Context.agent!(ctx).token)
+    response =
+      Context.request(ctx, :get, Context.url(ctx, :audit), token: Context.agent!(ctx).token)
+
     Assert.refused!(response, "an agent reading the audit log")
   end
 
@@ -101,7 +106,8 @@ defmodule HcpConformance.Checks.Audit do
           {event["eventType"] in @event_types,
            "eventType #{inspect(event["eventType"])} is not a registered event type"},
           {Envelope.iso8601?(event["timestamp"]), "timestamp must be ISO-8601"},
-          {is_binary(event["actorId"]) and event["actorId"] != "", "actorId must be a non-empty string"},
+          {is_binary(event["actorId"]) and event["actorId"] != "",
+           "actorId must be a non-empty string"},
           {event["actorType"] in @actor_types,
            "actorType must be user, agent or system, got #{inspect(event["actorType"])}"}
         ]
@@ -123,7 +129,12 @@ defmodule HcpConformance.Checks.Audit do
   defp pagination(ctx) do
     ensure_events!(ctx, 3)
     first = page!(ctx, limit: 1)
-    Assert.check!(length(first["events"]) == 1, "limit=1 returned #{length(first["events"])} events")
+
+    Assert.check!(
+      length(first["events"]) == 1,
+      "limit=1 returned #{length(first["events"])} events"
+    )
+
     cursor = first["nextCursor"]
 
     Assert.check!(
@@ -156,7 +167,11 @@ defmodule HcpConformance.Checks.Audit do
     ensure_events!(ctx, 2)
     cursor = page!(ctx, limit: 1)["nextCursor"]
     Assert.check!(is_binary(cursor), "no cursor was returned to inspect")
-    Assert.check!(not readable?(cursor), "the cursor #{inspect(cursor)} discloses a position or count")
+
+    Assert.check!(
+      not readable?(cursor),
+      "the cursor #{inspect(cursor)} discloses a position or count"
+    )
   end
 
   @doc "Whether a cursor reveals a number: plainly, or after base64 or JSON decoding."
@@ -196,7 +211,8 @@ defmodule HcpConformance.Checks.Audit do
     )
   end
 
-  defp walk_to_last(_ctx, _cursor, 60), do: Assert.fail!("the audit log did not end within 60 pages of 200")
+  defp walk_to_last(_ctx, _cursor, 60),
+    do: Assert.fail!("the audit log did not end within 60 pages of 200")
 
   defp walk_to_last(ctx, cursor, pages) do
     body = page!(ctx, if(cursor, do: [limit: 200, cursor: cursor], else: [limit: 200]))

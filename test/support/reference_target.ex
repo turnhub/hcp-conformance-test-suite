@@ -12,14 +12,26 @@ defmodule HcpConformance.ReferenceTarget do
     {:ok, pid} = Bandit.start_link(plug: plug, port: 0, ip: :loopback, startup_log: false)
     {:ok, {_ip, port}} = ThousandIsland.listener_info(pid)
     base = "http://127.0.0.1:#{port}"
-    %{base: base, hook_url: base <> "/conformance-hook", hook_secret: @secret, server: pid, store: store}
+
+    %{
+      base: base,
+      hook_url: base <> "/conformance-hook",
+      hook_secret: @secret,
+      server: pid,
+      store: store
+    }
   end
 
   @doc "Run attributes for the hook mode against a started target."
   @spec hook_config(map(), map()) :: map()
   def hook_config(target, extra \\ %{}) do
     Map.merge(
-      %{target: target.base, hook_url: target.hook_url, hook_secret: target.hook_secret, allow_private: true},
+      %{
+        target: target.base,
+        hook_url: target.hook_url,
+        hook_secret: target.hook_secret,
+        allow_private: true
+      },
       extra
     )
   end
@@ -28,7 +40,11 @@ defmodule HcpConformance.ReferenceTarget do
   @spec person_token!(map()) :: String.t()
   def person_token!(target) do
     %{status: 201, body: %{"personToken" => token}} =
-      Req.post!(target.hook_url <> "/subjects", json: %{}, auth: {:bearer, target.hook_secret}, retry: false)
+      Req.post!(target.hook_url <> "/subjects",
+        json: %{},
+        auth: {:bearer, target.hook_secret},
+        retry: false
+      )
 
     token
   end

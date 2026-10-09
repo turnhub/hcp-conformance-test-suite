@@ -35,7 +35,14 @@ defmodule HcpConformance.Check do
         }
 
   @doc "Builds a check. `opts` take `requires` and `phase`."
-  @spec new(String.t(), String.t(), level(), String.t(), (HcpConformance.Context.t() -> term()), keyword()) ::
+  @spec new(
+          String.t(),
+          String.t(),
+          level(),
+          String.t(),
+          (HcpConformance.Context.t() -> term()),
+          keyword()
+        ) ::
           t()
   def new(id, section, level, title, run, opts \\ []) do
     %__MODULE__{

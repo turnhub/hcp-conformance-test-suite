@@ -59,8 +59,9 @@ defmodule HcpConformance.Config do
 
   @doc "Which authentication mode a config runs in."
   @spec mode(t()) :: mode()
-  def mode(%__MODULE__{hook_url: hook, hook_secret: secret}) when is_binary(hook) and is_binary(secret),
-    do: :hook
+  def mode(%__MODULE__{hook_url: hook, hook_secret: secret})
+      when is_binary(hook) and is_binary(secret),
+      do: :hook
 
   def mode(%__MODULE__{person_token: token}) when is_binary(token), do: :static
   def mode(_config), do: :anonymous
@@ -99,11 +100,13 @@ defmodule HcpConformance.Config do
     end
   end
 
-  defp base_from_discovery(url), do: String.replace(url, ~r{/\.well-known/hcp-configuration/?$}, "")
+  defp base_from_discovery(url),
+    do: String.replace(url, ~r{/\.well-known/hcp-configuration/?$}, "")
 
   defp http_url?(url) do
     match?(
-      %URI{scheme: scheme, host: host} when scheme in ["http", "https"] and is_binary(host) and host != "",
+      %URI{scheme: scheme, host: host}
+      when scheme in ["http", "https"] and is_binary(host) and host != "",
       URI.parse(url)
     )
   end

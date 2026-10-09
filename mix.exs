@@ -1,37 +1,92 @@
 defmodule HcpConformance.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
-
   def project do
     [
       app: :hcp_conformance,
-      version: @version,
+      version: "0.1.0",
       elixir: "~> 1.17",
-      start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
+      start_permanent: Mix.env() == :prod,
+      aliases: aliases(),
       deps: deps(),
-      escript: [main_module: HcpConformance.CLI, name: "hcp_conformance", app: nil],
+      compilers: [:phoenix_live_view] ++ Mix.compilers(),
+      listeners: [Phoenix.CodeReloader],
       releases: [hcp_conformance: [include_executables_for: [:unix]]]
     ]
   end
 
+  # Configuration for the OTP application.
+  #
+  # Type `mix help compile.app` for more information.
   def application do
     [
-      extra_applications: [:logger, :crypto],
-      mod: {HcpConformance.Application, []}
+      mod: {HcpConformance.Application, []},
+      extra_applications: [:logger, :runtime_tools, :crypto]
     ]
   end
 
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
-  defp elixirc_paths(_env), do: ["lib"]
+  def cli do
+    [
+      preferred_envs: [precommit: :test]
+    ]
+  end
 
+  # Specifies which paths to compile per environment.
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
+  # Specifies your project dependencies.
+  #
+  # Type `mix help deps` for examples and options.
   defp deps do
     [
-      {:req, "~> 0.5"},
-      {:jason, "~> 1.4"},
-      {:plug, "~> 1.16"},
-      {:bandit, "~> 1.5"}
+      {:phoenix, "~> 1.8.15"},
+      {:phoenix_html, "~> 4.1"},
+      {:phoenix_live_reload, "~> 1.2", only: :dev},
+      {:phoenix_live_view, "~> 1.2.0"},
+      {:lazy_html, ">= 0.1.0", only: :test},
+      {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
+      {:tailwind, "~> 0.5", runtime: Mix.env() == :dev},
+      {:heroicons,
+       github: "tailwindlabs/heroicons",
+       tag: "v2.2.0",
+       sparse: "optimized",
+       app: false,
+       compile: false,
+       depth: 1},
+      {:daisyui,
+       github: "saadeghi/daisyui",
+       tag: "v5.5.20",
+       sparse: "packages/bundle",
+       app: false,
+       compile: false,
+       depth: 1},
+      {:telemetry_metrics, "~> 1.0"},
+      {:telemetry_poller, "~> 1.0"},
+      {:jason, "~> 1.2"},
+      {:bandit, "~> 1.5"},
+      {:req, "~> 0.5"}
+    ]
+  end
+
+  # Aliases are shortcuts or tasks specific to the current project.
+  # For example, to install project dependencies and perform other setup tasks, run:
+  #
+  #     $ mix setup
+  #
+  # See the documentation for `Mix` for more info on aliases.
+  defp aliases do
+    [
+      setup: ["deps.get", "assets.setup", "assets.build"],
+      "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
+      "assets.build": ["compile", "tailwind hcp_conformance", "esbuild hcp_conformance"],
+      "assets.deploy": [
+        "tailwind hcp_conformance --minify",
+        "esbuild hcp_conformance --minify",
+        "phx.digest"
+      ],
+      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
     ]
   end
 end

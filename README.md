@@ -8,11 +8,12 @@ behind every finding.
 
 It runs three ways from one codebase:
 
-- **Hosted**: a small web app. Paste a URL, read the report, share the link.
-- **CLI**: `mix hcp.conformance`, an escript, or the Docker image. Exits non-zero
-  on failure, so it fits CI.
-- **API**: `POST /api/runs` on a hosted instance, for pipelines that should not
-  install anything.
+- **Hosted**: a stateless Phoenix app. Connect to a target, press run, and watch
+  the results stream in. Credentials live only in your encrypted session cookie.
+- **CLI**: `mix hcp.conformance` or the Docker image. Exits non-zero on failure,
+  so it fits CI.
+- **API**: `POST /api/runs` on a hosted instance answers with the report, for
+  pipelines that should not install anything.
 
 It ships with a **reference HCP implementation** that passes every check. The
 suite's own tests run against it twice: once as written, and once with a
@@ -24,7 +25,7 @@ exists for.
 | Specification | HCP v1, 1.0-draft-4 (September 2026) |
 | Checks | 94 (see [docs/CHECKS.md](docs/CHECKS.md)) |
 | Transports | RESTful HTTP in full; MCP manifest only |
-| Language | Elixir 1.17+, no database |
+| Built with | Elixir 1.17+, Phoenix 1.8 and LiveView, daisyUI; no database |
 
 ## Contents
 
@@ -41,20 +42,25 @@ exists for.
 
 ### Hosted
 
-Open the hosted instance, fill in the HCP base URL and the conformance hook, and
-press **Run the suite**. The page refreshes until the run finishes. Each finding
-expands to the requests and responses behind it. **Run against the reference
-implementation** shows a passing run without any setup.
+Open the hosted instance and connect: give the HCP base URL and either the
+conformance hook (a full run) or existing tokens (a partial run). Then pick the
+groups and press **Run the suite**. Results stream in as each check finishes.
+When the run ends, each failure expands to the requests and responses behind
+it, and the full report downloads as JSON. **Use the reference implementation**
+shows a passing run without any setup.
+
+The app is stateless. The connection, credentials included, is kept in your
+session cookie, which is encrypted as well as signed. A run lives in the page
+that started it: closing the tab stops it, and nothing is stored on the server.
 
 ### Locally, in the browser
 
 ```bash
-mix deps.get
-mix hcp.server          # http://localhost:4000, reference implementation at /reference
+mix setup               # deps, plus the Tailwind and esbuild binaries
+mix phx.server          # http://localhost:4000, reference implementation at /reference
 ```
 
-This is a Plug and Bandit app, not Phoenix, so `mix hcp.server` stands in for
-`mix phx.server`. Locally, targets on localhost and private networks are allowed.
+Locally, targets on localhost and private networks are allowed.
 
 ### CLI with Mix
 
@@ -77,23 +83,18 @@ docker run --rm -e HCP_HOOK_SECRET hcp-conformance bin/conformance \
   --target https://vault.example.com --hook-url https://vault.example.com/conformance-hook
 ```
 
-### Escript
-
-```bash
-MIX_ENV=prod mix escript.build      # needs Erlang/OTP on the machine that runs it
-./hcp_conformance --target https://vault.example.com --person-token "$HCP_PERSON_TOKEN"
-```
-
 ### API
 
 ```bash
 curl -s -X POST https://hcp-conformance.example.com/api/runs \
   -H 'content-type: application/json' \
   -d '{"target":"https://vault.example.com","hook_url":"https://vault.example.com/conformance-hook","hook_secret":"…"}'
-# {"id":"…","status_url":"/api/runs/…","report_url":"/runs/…"}
-
-curl -s https://hcp-conformance.example.com/api/runs/<id>   # status, then the report
+# 200 with the full report, once the run finishes; 422 for an invalid request;
+# 429 with Retry-After when the instance is running as many suites as it allows.
 ```
+
+`GET /api/checks` returns the catalogue. The API keeps nothing: the response is
+the report.
 
 ### CLI flags
 
@@ -176,34 +177,43 @@ tokens and secrets replaced by `[redacted]`.
 
 ## Hosting it
 
-The image serves the web runner and the reference implementation on one port, and
-keeps runs in memory. It needs no database. Run a single instance.
+The image is a Phoenix release. It serves the runner, the API and the reference
+implementation on one port, and needs no database or shared storage.
 
 ```bash
 docker build -t hcp-conformance .
-docker run -p 4000:4000 -e PUBLIC_URL=https://conformance.example.com hcp-conformance
+docker run -p 4000:4000 \
+  -e SECRET_KEY_BASE="$(mix phx.gen.secret)" \
+  -e PHX_HOST=conformance.example.com \
+  hcp-conformance
 ```
 
-**Fly.io**: `fly.toml` is included. Set `app` and `PUBLIC_URL`, run `fly deploy`,
-then `fly scale count 1`.
+**Fly.io**: `fly.toml` is included. Set `app` and `PHX_HOST`, run
+`fly secrets set SECRET_KEY_BASE=…`, then `fly deploy`.
 
 **Google Cloud Run**:
 
 ```bash
 gcloud run deploy hcp-conformance --source . --port 4000 \
-  --max-instances 1 --set-env-vars PUBLIC_URL=https://…run.app --allow-unauthenticated
+  --set-env-vars PHX_HOST=…run.app,BIND_ADDRESS=0.0.0.0 \
+  --set-secrets SECRET_KEY_BASE=hcp-conformance-secret-key-base:latest --allow-unauthenticated
 ```
+
+Because it is stateless it scales to several instances. The concurrency cap below
+then applies per instance.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `SERVE` | `true` in the image | Start the web runner. `mix hcp.server` sets it for you. |
+| `SECRET_KEY_BASE` | required to serve | Signs and encrypts the session cookie. Generate with `mix phx.gen.secret`. |
+| `PHX_HOST` | `example.com` | The public host name. |
+| `PHX_URL_SCHEME`, `PHX_URL_PORT` | `https`, `443` | The public URL's scheme and port. Set `http` and the port for a plain-http run without a TLS proxy. |
 | `PORT` | `4000` | Listening port. |
-| `PUBLIC_URL` | derived from the request | The instance's public URL, for links and the reference implementation's discovery document. |
+| `BIND_ADDRESS` | `::` (all, IPv6 included) | Set `0.0.0.0` on hosts without IPv6. |
 | `ALLOW_PRIVATE_TARGETS` | `false` in the image, `true` locally | Allow targets on loopback and private networks. Leave off on a public instance. |
-| `MAX_CONCURRENT_RUNS` | `4` | Runs at once; more answer 429. |
-| `UI_BASIC_AUTH` | unset | `user:password` to put the runner behind basic auth. `/health` and `/reference` stay open. |
+| `MAX_CONCURRENT_RUNS` | `4` | Runs at once per instance. More are refused (429 on the API). |
+| `UI_BASIC_AUTH` | unset | `user:password` to put the runner and the API behind basic auth. `/health` and `/reference` stay open. |
 | `REFERENCE_SERVER` | `true` | Serve the reference implementation at `/reference`. |
-| `REFERENCE_HOOK_SECRET` | `reference-hook-secret` | The reference hook's secret. The home page's demo button shows it: the reference holds only synthetic, in-memory data. |
+| `REFERENCE_HOOK_SECRET` | `reference-hook-secret` | The reference hook's secret. The connect page's demo button uses it: the reference holds only synthetic, in-memory data. |
 
 **Security notes for a public instance.**
 
@@ -211,8 +221,8 @@ gcloud run deploy hcp-conformance --source . --port 4000 \
   resolve to private, loopback or link-local addresses unless
   `ALLOW_PRIVATE_TARGETS` is set. The resolved address is not pinned for the
   connection, so also deploy it without access to internal networks.
-- Hook secrets and tokens are used for the run and never stored. Stored runs
-  hold the target URL and mode only, and transcripts are redacted.
+- Hook secrets and tokens are never stored on the server. They live in the
+  visitor's encrypted session cookie, and transcripts and reports redact them.
 - Visitors hand the instance credentials for their own systems. Run a public
   instance only where people can trust its operator, or put it behind
   `UI_BASIC_AUTH`.
@@ -237,10 +247,14 @@ over `Hcp.issue_grant` and `Tokens.generate`.
 ## Developing the suite
 
 ```bash
-mix test           # 45 tests, about 10 seconds; no network beyond localhost
-mix format
+mix setup
+mix test           # 60 tests, about 10 seconds; no network beyond localhost
+mix precommit      # warnings as errors, unused deps, format, tests
 mix hcp.checks > docs/CHECKS.md    # after adding or changing a check; a test enforces it
 ```
+
+The test endpoint listens on port 4002, so the LiveView and API tests run real
+suites against the reference implementation the app serves.
 
 The tests run every check against the reference server in hook, static and
 anonymous mode, and require a clean pass. `test/fault_detection_test.exs` then
@@ -248,6 +262,10 @@ switches on one defect at a time in the reference server, such as padding search
 results or leaking a conflicted entry's old version. It requires the matching check
 to fail and the others to keep passing. Two checks were blind to their defect
 until these tests caught it.
+
+**UI.** Pages use the components Phoenix generates (`core_components.ex`) and
+daisyUI component classes, nothing hand-styled. AGENTS.md records this for
+agents working in the repo.
 
 **Adding a check.** Add a `Check.new/6` to the right module in
 `lib/hcp_conformance/checks/`. Then add a fault to the reference server and a
@@ -263,7 +281,8 @@ Layout:
 | `lib/hcp_conformance/http.ex`, `transcript.ex`, `target_guard.ex` | Talking to targets, recording, redaction, private-network guard |
 | `lib/hcp_conformance/envelope.ex` | The §2.2 envelope rules, in either form |
 | `lib/hcp_conformance/reference/` | The reference HCP implementation and its conformance hook |
-| `lib/hcp_conformance/web/` | The hosted runner and API |
+| `lib/hcp_conformance/runs.ex`, `settings.ex` | Starting runs from the web, the concurrency cap, deployment settings |
+| `lib/hcp_conformance_web/` | The Phoenix app: connect page, run LiveView, API, reference mount |
 | `docs/HOOK.md`, `docs/CHECKS.md` | The hook protocol and the check catalogue |
 
 ## Known limits

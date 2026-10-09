@@ -82,7 +82,9 @@ defmodule HcpConformance.Reference.Server do
     }
 
     {status, body, type, headers} = route(request, opts.store)
-    conn = Enum.reduce(headers, conn, fn {name, value}, acc -> put_resp_header(acc, name, value) end)
+
+    conn =
+      Enum.reduce(headers, conn, fn {name, value}, acc -> put_resp_header(acc, name, value) end)
 
     case body do
       nil ->
@@ -113,7 +115,10 @@ defmodule HcpConformance.Reference.Server do
 
   defp base_url(conn) do
     scheme = get_req_header(conn, "x-forwarded-proto") |> List.first() || to_string(conn.scheme)
-    default_port? = (scheme == "https" and conn.port in [443, 80]) or (scheme == "http" and conn.port == 80)
+
+    default_port? =
+      (scheme == "https" and conn.port in [443, 80]) or (scheme == "http" and conn.port == 80)
+
     host = if default_port?, do: conn.host, else: "#{conn.host}:#{conn.port}"
     mount = Enum.map_join(conn.script_name, "", &("/" <> &1))
     "#{scheme}://#{host}#{mount}"
@@ -122,8 +127,14 @@ defmodule HcpConformance.Reference.Server do
   # Responses -------------------------------------------------------------------
 
   defp ok(request, status, body) do
-    body = if fault?(request, :omit_hcp_version), do: body, else: Map.put(body, "hcp_version", @version)
-    type = if fault?(request, :wrong_media_type), do: "application/json", else: "application/ld+json"
+    body =
+      if fault?(request, :omit_hcp_version),
+        do: body,
+        else: Map.put(body, "hcp_version", @version)
+
+    type =
+      if fault?(request, :wrong_media_type), do: "application/json", else: "application/ld+json"
+
     {status, body, type, []}
   end
 
@@ -157,7 +168,8 @@ defmodule HcpConformance.Reference.Server do
 
   # Routing ---------------------------------------------------------------------
 
-  defp route(%{path: ["conformance-hook" | rest]} = request, store), do: hook(request, rest, store)
+  defp route(%{path: ["conformance-hook" | rest]} = request, store),
+    do: hook(request, rest, store)
 
   defp route(request, store) do
     version = request.headers["hcp-version"]
@@ -245,7 +257,8 @@ defmodule HcpConformance.Reference.Server do
         {response, put_in(state, [:subjects, subject_id], subject)}
       else
         {:expired, subject} ->
-          {problem("invalid-token", "The grant has expired"), put_in(state, [:subjects, subject.id], subject)}
+          {problem("invalid-token", "The grant has expired"),
+           put_in(state, [:subjects, subject.id], subject)}
 
         _invalid ->
           {problem("invalid-token", "Missing or invalid bearer token"), state}
@@ -253,7 +266,8 @@ defmodule HcpConformance.Reference.Server do
     end)
   end
 
-  defp actor(_request, subject, :person), do: {:ok, %{type: "user", id: subject.did, grant: nil}, subject}
+  defp actor(_request, subject, :person),
+    do: {:ok, %{type: "user", id: subject.did, grant: nil}, subject}
 
   defp actor(request, subject, {:grant, grant_id}) do
     grant = subject.grants[grant_id]
@@ -276,7 +290,8 @@ defmodule HcpConformance.Reference.Server do
 
         {:expired, subject}
 
-      grant.status == "active" or (grant.status == "revoked" and fault?(request, :revocation_ignored)) ->
+      grant.status == "active" or
+          (grant.status == "revoked" and fault?(request, :revocation_ignored)) ->
         {:ok, %{type: "agent", id: grant.client_id, grant: grant}, subject}
 
       true ->
@@ -325,7 +340,11 @@ defmodule HcpConformance.Reference.Server do
 
   defp actor_event(actor, fields) do
     Map.merge(
-      %{"actorId" => actor.id, "actorType" => actor.type, "grantId" => actor.grant && actor.grant.id},
+      %{
+        "actorId" => actor.id,
+        "actorType" => actor.type,
+        "grantId" => actor.grant && actor.grant.id
+      },
       fields
     )
   end
@@ -347,7 +366,11 @@ defmodule HcpConformance.Reference.Server do
     if user?(actor) or fault?(request, :no_redaction) do
       envelope
     else
-      update_in(envelope, ["record", "provenance"], &Map.drop(&1 || %{}, ["source", "capturedBy"]))
+      update_in(
+        envelope,
+        ["record", "provenance"],
+        &Map.drop(&1 || %{}, ["source", "capturedBy"])
+      )
     end
   end
 
@@ -385,7 +408,8 @@ defmodule HcpConformance.Reference.Server do
       not (is_binary(claim["subject"]["preference"]) or is_map(claim["subject"]["preference"])) ->
         {:error, "claim.subject.preference is required"}
 
-      not (is_binary(category) and (category in @categories or String.starts_with?(category, "hcp-custom:"))) ->
+      not (is_binary(category) and
+               (category in @categories or String.starts_with?(category, "hcp-custom:"))) ->
         {:error, "record.category must be a registered category"}
 
       not (is_nil(record["dimension"]) or is_binary(record["dimension"])) ->
@@ -415,8 +439,11 @@ defmodule HcpConformance.Reference.Server do
            true <- allowed?(actor, category, "write") || :denied do
         create(request, subject, actor)
       else
-        :denied -> {problem("scope-denied", "The grant does not allow writing this category"), subject}
-        {:error, detail} -> {problem("malformed-request", detail), subject}
+        :denied ->
+          {problem("scope-denied", "The grant does not allow writing this category"), subject}
+
+        {:error, detail} ->
+          {problem("malformed-request", detail), subject}
       end
     end)
   end
@@ -484,7 +511,8 @@ defmodule HcpConformance.Reference.Server do
       not is_list(categories) or categories == [] or not Enum.all?(categories, &is_binary/1) ->
         {problem("malformed-request", "categories is required"), subject}
 
-      not fault?(request, :no_purpose_check) and not (is_binary(body["purpose"]) and body["purpose"] != "") ->
+      not fault?(request, :no_purpose_check) and
+          not (is_binary(body["purpose"]) and body["purpose"] != "") ->
         {problem("malformed-request", "purpose is required"), subject}
 
       not (is_nil(max) or (is_integer(max) and max > 0)) ->
@@ -511,7 +539,8 @@ defmodule HcpConformance.Reference.Server do
       |> Enum.with_index()
       |> Enum.map(fn {id, index} -> {current(subject, id), index} end)
       |> Enum.filter(fn {envelope, _index} ->
-        envelope != nil and status_of(envelope) == "active" and category_of(envelope) in categories and
+        envelope != nil and status_of(envelope) == "active" and
+          category_of(envelope) in categories and
           within_restrictions?(actor, category_of(envelope), "read", envelope["id"])
       end)
 
@@ -548,13 +577,18 @@ defmodule HcpConformance.Reference.Server do
     response = %{
       "entries" => entries,
       "retrievalId" => urn_uuid(),
-      "minimization" => %{"method" => "lexical", "redactedFields" => redacted_fields(actor, request)},
+      "minimization" => %{
+        "method" => "lexical",
+        "redactedFields" => redacted_fields(actor, request)
+      },
       "categoriesSearched" => categories,
       "timestamp" => iso(request.now)
     }
 
     response =
-      if fault?(request, :count_leak), do: Map.put(response, "total", length(candidates)), else: response
+      if fault?(request, :count_leak),
+        do: Map.put(response, "total", length(candidates)),
+        else: response
 
     {ok(request, 200, response), subject}
   end
@@ -595,7 +629,9 @@ defmodule HcpConformance.Reference.Server do
   defp tokens(other), do: tokens(Jason.encode!(other))
 
   defp score(query, envelope) do
-    query |> MapSet.intersection(tokens(envelope["claim"]["subject"]["preference"])) |> MapSet.size()
+    query
+    |> MapSet.intersection(tokens(envelope["claim"]["subject"]["preference"]))
+    |> MapSet.size()
   end
 
   defp get_entry(request, subject, actor, id) do
@@ -609,15 +645,19 @@ defmodule HcpConformance.Reference.Server do
 
       is_nil(envelope) ->
         if user?(actor) or not fault?(request, :not_found_for_agent),
-          do: {problem("scope-denied", "Entry is outside the caller's scopes or does not exist"), subject},
+          do:
+            {problem("scope-denied", "Entry is outside the caller's scopes or does not exist"),
+             subject},
           else: {not_found("No such entry"), subject}
 
       not user?(actor) and hidden_from_agent?(envelope, version, request) ->
-        {problem("scope-denied", "Entry is outside the caller's scopes or does not exist"), subject}
+        {problem("scope-denied", "Entry is outside the caller's scopes or does not exist"),
+         subject}
 
       not allowed?(actor, category_of(envelope), "read") or
           not within_restrictions?(actor, category_of(envelope), "read", id) ->
-        {problem("scope-denied", "Entry is outside the caller's scopes or does not exist"), subject}
+        {problem("scope-denied", "Entry is outside the caller's scopes or does not exist"),
+         subject}
 
       true ->
         read_version(request, subject, actor, id, version, purpose)
@@ -632,9 +672,14 @@ defmodule HcpConformance.Reference.Server do
   defp read_version(request, subject, actor, id, version, purpose) do
     selected =
       case version && Integer.parse(version) do
-        nil -> current(subject, id)
-        {number, ""} -> Enum.find(subject.entries[id].versions, &(&1["record"]["version"] == number))
-        _invalid -> :invalid
+        nil ->
+          current(subject, id)
+
+        {number, ""} ->
+          Enum.find(subject.entries[id].versions, &(&1["record"]["version"] == number))
+
+        _invalid ->
+          :invalid
       end
 
     case selected do
@@ -660,7 +705,10 @@ defmodule HcpConformance.Reference.Server do
         {ok(request, 200, %{
            "entry" => redact(envelope, actor, request),
            "retrievalId" => urn_uuid(),
-           "minimization" => %{"method" => "lexical", "redactedFields" => redacted_fields(actor, request)},
+           "minimization" => %{
+             "method" => "lexical",
+             "redactedFields" => redacted_fields(actor, request)
+           },
            "timestamp" => iso(request.now)
          }), subject}
     end
@@ -691,7 +739,8 @@ defmodule HcpConformance.Reference.Server do
           {problem("malformed-request", "updatedPreference is required"), subject}
 
         :denied ->
-          {problem("scope-denied", "Entry is outside the caller's scopes or does not exist"), subject}
+          {problem("scope-denied", "Entry is outside the caller's scopes or does not exist"),
+           subject}
       end
     end)
   end
@@ -747,7 +796,8 @@ defmodule HcpConformance.Reference.Server do
     idempotent(request, subject, "DELETE /v1/preferences/" <> id, fn subject ->
       case writable(subject, actor, id) do
         :denied ->
-          {problem("scope-denied", "Entry is outside the caller's scopes or does not exist"), subject}
+          {problem("scope-denied", "Entry is outside the caller's scopes or does not exist"),
+           subject}
 
         {:ok, _envelope} when hard and actor.type != "user" ->
           {problem("scope-denied", "Hard deletion is the person's alone"), subject}
@@ -882,7 +932,8 @@ defmodule HcpConformance.Reference.Server do
   defp declared_counterpart(subject, inferred) do
     case Enum.find(
            currents(subject),
-           &(&1 != nil and declared?(&1) and status_of(&1) == "active" and conflicting?(&1, inferred))
+           &(&1 != nil and declared?(&1) and status_of(&1) == "active" and
+               conflicting?(&1, inferred))
          ) do
       nil -> nil
       declared -> declared["id"]
@@ -899,7 +950,8 @@ defmodule HcpConformance.Reference.Server do
 
     subject =
       if related,
-        do: put_current(subject, related["id"], put_in(related, ["record", "status"], "deprecated")),
+        do:
+          put_current(subject, related["id"], put_in(related, ["record", "status"], "deprecated")),
         else: subject
 
     append(
@@ -918,7 +970,8 @@ defmodule HcpConformance.Reference.Server do
     if declared?(revised) do
       currents(subject)
       |> Enum.filter(
-        &(inferred?(&1) and status_of(&1) == "conflicted" and category_of(&1) == category_of(revised))
+        &(inferred?(&1) and status_of(&1) == "conflicted" and
+            category_of(&1) == category_of(revised))
       )
       |> Enum.reduce(subject, fn inferred, acc ->
         still =
@@ -996,13 +1049,19 @@ defmodule HcpConformance.Reference.Server do
           if grant.status == "active" do
             subject
             |> put_in([:grants, id, :status], "revoked")
-            |> append(request, actor_event(actor, %{"eventType" => "grant.revoked", "grantId" => id}))
+            |> append(
+              request,
+              actor_event(actor, %{"eventType" => "grant.revoked", "grantId" => id})
+            )
           else
             subject
           end
 
-        {ok(request, 200, %{"grantId" => id, "status" => "revoked", "timestamp" => iso(request.now)}),
-         subject}
+        {ok(request, 200, %{
+           "grantId" => id,
+           "status" => "revoked",
+           "timestamp" => iso(request.now)
+         }), subject}
     end
   end
 
@@ -1028,7 +1087,8 @@ defmodule HcpConformance.Reference.Server do
           {nil, subject}
         end
 
-      {ok(request, 200, %{"events" => Enum.map(page, &public_event/1), "nextCursor" => next}), subject}
+      {ok(request, 200, %{"events" => Enum.map(page, &public_event/1), "nextCursor" => next}),
+       subject}
     else
       :denied -> {problem("scope-denied", "The audit log is the person's alone"), subject}
       {:error, detail} -> {problem("malformed-request", detail), subject}
@@ -1081,7 +1141,10 @@ defmodule HcpConformance.Reference.Server do
           "deleted" in exclude and status_of(current(subject, id)) == "deleted"
         end)
 
-      body = %{"entries" => Enum.map(ids, &current(subject, &1)), "exportedAt" => iso(request.now)}
+      body = %{
+        "entries" => Enum.map(ids, &current(subject, &1)),
+        "exportedAt" => iso(request.now)
+      }
 
       body =
         if "versions" in include,
@@ -1089,7 +1152,10 @@ defmodule HcpConformance.Reference.Server do
             Map.put(
               body,
               "versions",
-              Enum.map(ids, &%{"entryId" => &1, "versions" => Enum.reverse(subject.entries[&1].versions)})
+              Enum.map(
+                ids,
+                &%{"entryId" => &1, "versions" => Enum.reverse(subject.entries[&1].versions)}
+              )
             ),
           else: body
 
@@ -1123,7 +1189,8 @@ defmodule HcpConformance.Reference.Server do
     if is_nil(key) or fault?(request, :no_idempotency) do
       operation.(subject)
     else
-      fingerprint = :crypto.hash(:sha256, request.raw <> "?" <> URI.encode_query(Enum.sort(request.query)))
+      fingerprint =
+        :crypto.hash(:sha256, request.raw <> "?" <> URI.encode_query(Enum.sort(request.query)))
 
       case subject.idempotency[{endpoint, key}] do
         {^fingerprint, response} ->
@@ -1173,7 +1240,9 @@ defmodule HcpConformance.Reference.Server do
     }
 
     Store.transaction(store, fn state -> {:ok, Store.put_subject(state, subject)} end)
-    {201, %{"subjectId" => id, "subjectDid" => subject.did, "personToken" => token}, "application/json", []}
+
+    {201, %{"subjectId" => id, "subjectDid" => subject.did, "personToken" => token},
+     "application/json", []}
   end
 
   defp hook_route(%{method: "POST"} = request, ["subjects", subject_id, "grants"], store) do
@@ -1186,7 +1255,9 @@ defmodule HcpConformance.Reference.Server do
   end
 
   defp hook_route(%{method: "DELETE"}, ["subjects", subject_id], store) do
-    Store.transaction(store, fn state -> {{204, nil, nil, []}, Store.drop_subject(state, subject_id)} end)
+    Store.transaction(store, fn state ->
+      {{204, nil, nil, []}, Store.drop_subject(state, subject_id)}
+    end)
   end
 
   defp hook_route(_request, _path, _store), do: not_found("No such hook route")
@@ -1201,17 +1272,22 @@ defmodule HcpConformance.Reference.Server do
     error =
       cond do
         not (is_list(scopes) and scopes != [] and
-                 Enum.all?(scopes, &(is_binary(&1) and Regex.match?(~r/^hcp:[^*\s]+:(read|write)$/, &1)))) ->
+                 Enum.all?(
+                   scopes,
+                   &(is_binary(&1) and Regex.match?(~r/^hcp:[^*\s]+:(read|write)$/, &1))
+                 )) ->
           "scopes must be hcp:{category}:{read|write} strings without wildcards"
 
         grant_type not in ["temporary", "persistent"] ->
           "grantType must be temporary or persistent"
 
-        grant_type == "temporary" and not (is_integer(seconds) and seconds > 0 and seconds <= 86_400) ->
+        grant_type == "temporary" and
+            not (is_integer(seconds) and seconds > 0 and seconds <= 86_400) ->
           "a temporary grant expires within 24 hours"
 
         not (is_nil(restrictions) or
-                 (is_list(restrictions) and Enum.all?(restrictions, &(is_map(&1) and &1["scope"] in scopes)))) ->
+                 (is_list(restrictions) and
+                    Enum.all?(restrictions, &(is_map(&1) and &1["scope"] in scopes)))) ->
           "every restriction must reference a scope the grant holds"
 
         not (is_binary(body["clientId"]) and is_binary(body["clientName"])) ->
@@ -1226,7 +1302,9 @@ defmodule HcpConformance.Reference.Server do
     else
       grant_id = urn_uuid()
       token = "ref-grant-" <> random_token()
-      expires_at = if grant_type == "temporary", do: iso(DateTime.add(request.now, seconds, :second))
+
+      expires_at =
+        if grant_type == "temporary", do: iso(DateTime.add(request.now, seconds, :second))
 
       grant = %{
         id: grant_id,
@@ -1264,8 +1342,8 @@ defmodule HcpConformance.Reference.Server do
           tokens: Map.put(state.tokens, token, {subject.id, {:grant, grant_id}})
       }
 
-      {{201, %{"grantId" => grant_id, "token" => token, "expiresAt" => expires_at}, "application/json", []},
-       state}
+      {{201, %{"grantId" => grant_id, "token" => token, "expiresAt" => expires_at},
+        "application/json", []}, state}
     end
   end
 

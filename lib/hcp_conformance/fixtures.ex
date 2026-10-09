@@ -26,7 +26,8 @@ defmodule HcpConformance.Fixtures do
         "expirationDate" => nil,
         "subject" => %{
           "id" => ctx.subject_did,
-          "preference" => Keyword.get(opts, :preference, "Conformance statement " <> Context.unique_word(ctx))
+          "preference" =>
+            Keyword.get(opts, :preference, "Conformance statement " <> Context.unique_word(ctx))
         }
       })
 
@@ -38,7 +39,8 @@ defmodule HcpConformance.Fixtures do
         "confidence" => confidence,
         "provenance" => %{
           "source" => "conversation-id:hcp-conformance-" <> ctx.nonce,
-          "capturedAt" => DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
+          "capturedAt" =>
+            DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601(),
           "capturedBy" => "agent:hcp-conformance-suite",
           "userVerified" => Keyword.get(opts, :user_verified, declaration == "user-declared")
         }
@@ -55,14 +57,19 @@ defmodule HcpConformance.Fixtures do
         "credentialType" => "NLPreference"
       })
 
-    Enum.reduce(Keyword.get(opts, :drop, []), body, fn path, acc -> drop(acc, ctx.envelope_form, path) end)
+    Enum.reduce(Keyword.get(opts, :drop, []), body, fn path, acc ->
+      drop(acc, ctx.envelope_form, path)
+    end)
   end
 
   @doc "Creates an entry and returns the 201 body. Fails the check unless the target accepts it."
   @spec create!(Context.t(), String.t(), keyword()) :: map()
   def create!(ctx, token, opts \\ []) do
     response =
-      Context.request(ctx, :post, Context.url(ctx, :preferences), token: token, json: entry_body(ctx, opts))
+      Context.request(ctx, :post, Context.url(ctx, :preferences),
+        token: token,
+        json: entry_body(ctx, opts)
+      )
 
     Assert.status!(response, 201, "POST /v1/preferences")
     entry = Assert.json_object!(response, "POST /v1/preferences")
@@ -75,7 +82,12 @@ defmodule HcpConformance.Fixtures do
   @doc "Searches as `token` and returns the 200 body."
   @spec search!(Context.t(), String.t(), map()) :: map()
   def search!(ctx, token, body) do
-    body = Map.merge(%{"categories" => [ctx.primary_category], "purpose" => "HCP conformance check"}, body)
+    body =
+      Map.merge(
+        %{"categories" => [ctx.primary_category], "purpose" => "HCP conformance check"},
+        body
+      )
+
     response = Context.request(ctx, :post, Context.url(ctx, :search), token: token, json: body)
     Assert.status!(response, 200, "POST /v1/preferences/search")
     Assert.json_object!(response, "POST /v1/preferences/search")
@@ -92,11 +104,16 @@ defmodule HcpConformance.Fixtures do
 
   @doc "Ids of the entries in a search or export body."
   @spec ids(map()) :: [String.t()]
-  def ids(%{"entries" => entries}) when is_list(entries), do: Enum.map(entries, &(is_map(&1) && &1["id"]))
+  def ids(%{"entries" => entries}) when is_list(entries),
+    do: Enum.map(entries, &(is_map(&1) && &1["id"]))
+
   def ids(_body), do: []
 
   defp compact(map),
-    do: map |> Enum.reject(fn {key, value} -> is_nil(value) and key != "expirationDate" end) |> Map.new()
+    do:
+      map
+      |> Enum.reject(fn {key, value} -> is_nil(value) and key != "expirationDate" end)
+      |> Map.new()
 
   defp drop(body, form, path) do
     [last | parents] = Enum.reverse(path)

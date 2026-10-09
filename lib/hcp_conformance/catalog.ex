@@ -20,7 +20,9 @@ defmodule HcpConformance.Catalog do
   @doc "All checks, each tagged with its group."
   @spec all() :: [HcpConformance.Check.t()]
   def all do
-    Enum.flat_map(@modules, fn module -> Enum.map(module.checks(), &%{&1 | group: module.group()}) end)
+    Enum.flat_map(@modules, fn module ->
+      Enum.map(module.checks(), &%{&1 | group: module.group()})
+    end)
   end
 
   @doc "The group names, in run order."

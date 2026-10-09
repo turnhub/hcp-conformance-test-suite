@@ -116,7 +116,9 @@ defmodule HcpConformance.Context do
 
   @doc "The person's token, or skip."
   @spec person!(t()) :: String.t()
-  def person!(%__MODULE__{person_token: nil}), do: Assert.skip!("no person credential for this run")
+  def person!(%__MODULE__{person_token: nil}),
+    do: Assert.skip!("no person credential for this run")
+
   def person!(%__MODULE__{person_token: token}), do: token
 
   @doc "The default agent (read and write on the primary category), or skip."
@@ -138,8 +140,11 @@ defmodule HcpConformance.Context do
   @spec issue_grant!(t(), keyword()) :: map()
   def issue_grant!(ctx, opts) do
     case issue_grant(ctx, opts) do
-      {:ok, grant} -> grant
-      {:error, message} -> Assert.fail!("the conformance hook could not issue a grant: " <> message)
+      {:ok, grant} ->
+        grant
+
+      {:error, message} ->
+        Assert.fail!("the conformance hook could not issue a grant: " <> message)
     end
   end
 
@@ -158,7 +163,11 @@ defmodule HcpConformance.Context do
         "scopes" => Keyword.fetch!(opts, :scopes),
         "grantType" => grant_type
       }
-      |> put_if(grant_type == "temporary", "expiresInSeconds", Keyword.get(opts, :expires_in, 3600))
+      |> put_if(
+        grant_type == "temporary",
+        "expiresInSeconds",
+        Keyword.get(opts, :expires_in, 3600)
+      )
       |> put_if(Keyword.has_key?(opts, :restrictions), "restrictions", opts[:restrictions])
 
     case Hook.issue_grant(
@@ -200,8 +209,16 @@ defmodule HcpConformance.Context do
     try do
       response = request(ctx, :get, url)
       discovery = if response.status == 200 and is_map(response.json), do: response.json
-      note = if discovery, do: [], else: ["discovery document not usable (HTTP #{response.status})"]
-      %{ctx | discovery: discovery, discovery_response: response, setup_notes: ctx.setup_notes ++ note}
+
+      note =
+        if discovery, do: [], else: ["discovery document not usable (HTTP #{response.status})"]
+
+      %{
+        ctx
+        | discovery: discovery,
+          discovery_response: response,
+          setup_notes: ctx.setup_notes ++ note
+      }
     rescue
       error in HTTP.TransportError ->
         %{ctx | setup_notes: ctx.setup_notes ++ ["discovery request failed: " <> error.message]}
@@ -277,7 +294,12 @@ defmodule HcpConformance.Context do
   defp authenticate_hook(ctx) do
     config = ctx.config
 
-    case Hook.create_subject(ctx.transcript, config.allow_private, config.hook_url, config.hook_secret) do
+    case Hook.create_subject(
+           ctx.transcript,
+           config.allow_private,
+           config.hook_url,
+           config.hook_secret
+         ) do
       {:ok, subject} ->
         Transcript.add_secret(ctx.transcript, subject.person_token)
 
@@ -295,7 +317,11 @@ defmodule HcpConformance.Context do
           %{ctx | agent: agent, capabilities: MapSet.put(ctx.capabilities, :agent)}
         rescue
           error in [HcpConformance.Failure, HTTP.TransportError] ->
-            %{ctx | setup_notes: ctx.setup_notes ++ ["default agent grant: " <> Exception.message(error)]}
+            %{
+              ctx
+              | setup_notes:
+                  ctx.setup_notes ++ ["default agent grant: " <> Exception.message(error)]
+            }
         end
 
       {:error, message} ->
@@ -355,7 +381,9 @@ defmodule HcpConformance.Context do
   defp put_capability(set, true, capability), do: MapSet.put(set, capability)
   defp put_capability(set, _false, _capability), do: set
 
-  defp string_or(value, _default) when is_binary(value) and value != "", do: String.trim_trailing(value, "/")
+  defp string_or(value, _default) when is_binary(value) and value != "",
+    do: String.trim_trailing(value, "/")
+
   defp string_or(_value, default), do: default
 
   defp put_if(map, true, key, value), do: Map.put(map, key, value)

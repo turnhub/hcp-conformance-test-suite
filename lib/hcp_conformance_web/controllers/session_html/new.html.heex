@@ -1,0 +1,88 @@
+<Layouts.app flash={@flash}>
+  <.header>
+    HCP conformance suite
+    <:subtitle>
+      Checks an implementation of the Human Context Protocol v1 (1.0-draft-4) against the
+      specification, over the network. Credentials live in your encrypted session cookie and
+      are never stored by the server.
+    </:subtitle>
+  </.header>
+
+  <div :if={@connection} id="connected" role="alert" class="alert alert-info">
+    <.icon name="hero-link" />
+    <span>Connected to {@connection["target"]}.</span>
+    <.button navigate={~p"/run"} id="continue">Continue to the run</.button>
+  </div>
+
+  <div :if={@reference} id="reference" class="card bg-base-200">
+    <div class="card-body">
+      <h2 class="card-title">Try it first</h2>
+      <p>This instance hosts a reference HCP implementation with the conformance hook.</p>
+      <.form for={%{}} as={:connection} action={~p"/session"} id="reference-form">
+        <.input type="hidden" name="connection[target]" value={@reference.target} />
+        <.input type="hidden" name="connection[hook_url]" value={@reference.hook_url} />
+        <.input type="hidden" name="connection[hook_secret]" value={@reference.hook_secret} />
+        <div class="card-actions">
+          <.button id="use-reference">Use the reference implementation</.button>
+        </div>
+      </.form>
+    </div>
+  </div>
+
+  <.form for={@form} action={~p"/session"} id="connect-form">
+    <.input
+      field={@form[:target]}
+      type="url"
+      label="HCP base URL"
+      placeholder="https://vault.example.com"
+      required
+    />
+    <.input
+      field={@form[:discovery_url]}
+      type="url"
+      label="Discovery URL (optional, if not under the base URL)"
+    />
+
+    <fieldset class="fieldset">
+      <legend class="fieldset-legend">Conformance hook: a full run</legend>
+      <p>
+        Lets the suite create a fresh test subject and the grants each check needs.
+        See <.link navigate={~p"/hook"} class="link">the hook</.link>.
+      </p>
+      <.input
+        field={@form[:hook_url]}
+        type="url"
+        label="Hook URL"
+        placeholder="https://vault.example.com/conformance-hook"
+      />
+      <.input field={@form[:hook_secret]} type="password" label="Hook secret" autocomplete="off" />
+    </fieldset>
+
+    <fieldset class="fieldset">
+      <legend class="fieldset-legend">Or existing credentials: a partial run</legend>
+      <p>
+        Without the hook, checks that need grants created on demand are skipped.
+      </p>
+      <.input
+        field={@form[:person_token]}
+        type="password"
+        label="Person token"
+        autocomplete="off"
+      />
+      <.input
+        field={@form[:agent_token]}
+        type="password"
+        label="Agent token (optional, read and write on the category)"
+        autocomplete="off"
+      />
+      <.input field={@form[:subject_did]} type="text" label="Subject DID (optional)" />
+    </fieldset>
+
+    <.input
+      field={@form[:category]}
+      type="text"
+      label="Category (optional, defaults to the first supported one)"
+    />
+    <.button variant="primary" id="connect">Connect</.button>
+  </.form>
+</Layouts.app>

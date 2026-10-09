@@ -1,5 +1,4 @@
-# Fly.io deployment for the hosted runner. Runs are kept in memory, so run one
-# machine: `fly deploy` then `fly scale count 1`.
+# Fly.io deployment. Set the secret once: fly secrets set SECRET_KEY_BASE=$(mix phx.gen.secret)
 app = "hcp-conformance"
 primary_region = "ams"
 
@@ -7,9 +6,8 @@ primary_region = "ams"
   dockerfile = "Dockerfile"
 
 [env]
-  SERVE = "true"
+  PHX_HOST = "hcp-conformance.fly.dev"
   PORT = "4000"
-  PUBLIC_URL = "https://hcp-conformance.fly.dev"
   ALLOW_PRIVATE_TARGETS = "false"
   MAX_CONCURRENT_RUNS = "4"
   REFERENCE_SERVER = "true"

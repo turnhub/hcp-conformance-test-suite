@@ -79,15 +79,20 @@ defmodule HcpConformance.Checks.Responses do
   defp responses(ctx) do
     ctx.transcript
     |> Transcript.exchanges()
-    |> Enum.filter(&(&1.kind == :target and is_integer(&1.status) and &1.url != ctx.endpoints.mcp_manifest))
+    |> Enum.filter(
+      &(&1.kind == :target and is_integer(&1.status) and &1.url != ctx.endpoints.mcp_manifest)
+    )
   end
 
   defp facts(exchange), do: exchange.facts || %{object: false}
 
   defp content_type(exchange) do
     Enum.find_value(exchange.response_headers, fn
-      {"content-type", value} -> value |> String.split(";") |> hd() |> String.trim() |> String.downcase()
-      _other -> nil
+      {"content-type", value} ->
+        value |> String.split(";") |> hd() |> String.trim() |> String.downcase()
+
+      _other ->
+        nil
     end)
   end
 
@@ -159,7 +164,10 @@ defmodule HcpConformance.Checks.Responses do
         [{exchange, "missing #{Enum.join(missing, ", ")}"}]
 
       facts.status != exchange.status ->
-        [{exchange, "status member #{inspect(facts.status)} differs from HTTP #{exchange.status}"}]
+        [
+          {exchange,
+           "status member #{inspect(facts.status)} differs from HTTP #{exchange.status}"}
+        ]
 
       true ->
         []
@@ -193,7 +201,9 @@ defmodule HcpConformance.Checks.Responses do
     ctx
     |> responses()
     |> Enum.filter(&(&1.status == 429))
-    |> Enum.reject(fn exchange -> Enum.any?(exchange.response_headers, &(elem(&1, 0) == "retry-after")) end)
+    |> Enum.reject(fn exchange ->
+      Enum.any?(exchange.response_headers, &(elem(&1, 0) == "retry-after"))
+    end)
     |> Enum.map(&{&1, "no Retry-After header"})
     |> report!("429 responses without Retry-After")
   end

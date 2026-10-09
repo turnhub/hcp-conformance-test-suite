@@ -153,11 +153,20 @@ defmodule HcpConformance.Checks.Search do
     body = Fixtures.search!(ctx, Context.person!(ctx), %{"query" => word})
 
     Assert.check!(is_list(body["entries"]), "the body must carry an entries array")
-    Assert.check!(entry["id"] in Fixtures.ids(body), "the search did not return the entry it matches")
+
+    Assert.check!(
+      entry["id"] in Fixtures.ids(body),
+      "the search did not return the entry it matches"
+    )
+
     Assert.check!(is_binary(body["retrievalId"]), "the body must carry a retrievalId")
     Assert.check!(is_map(body["minimization"]), "the body must carry a minimization object")
     Assert.check!(is_list(body["categoriesSearched"]), "the body must carry categoriesSearched")
-    Assert.check!(Envelope.iso8601?(body["timestamp"]), "the body must carry an ISO-8601 timestamp")
+
+    Assert.check!(
+      Envelope.iso8601?(body["timestamp"]),
+      "the body must carry an ISO-8601 timestamp"
+    )
   end
 
   defp requires_purpose(ctx) do
@@ -186,7 +195,11 @@ defmodule HcpConformance.Checks.Search do
     seed!(ctx, 7, word)
     body = Fixtures.search!(ctx, Context.person!(ctx), %{"query" => word})
     count = length(body["entries"] || [])
-    Assert.check!(count in 1..5, "expected between 1 and 5 entries with the default maxEntries, got #{count}")
+
+    Assert.check!(
+      count in 1..5,
+      "expected between 1 and 5 entries with the default maxEntries, got #{count}"
+    )
   end
 
   defp ceiling(ctx) do
@@ -239,15 +252,26 @@ defmodule HcpConformance.Checks.Search do
 
   defp relevance_order(ctx) do
     if Discovery.discovery!(ctx)["minimization_method"] != "lexical",
-      do: Assert.not_applicable!("the declared method is not lexical, so the expected order cannot be stated")
+      do:
+        Assert.not_applicable!(
+          "the declared method is not lexical, so the expected order cannot be stated"
+        )
 
     word = Context.unique_word(ctx)
     second_word = Context.unique_word(ctx)
-    strong = Fixtures.create!(ctx, Context.person!(ctx), preference: "Strong match #{word} #{second_word}")
+
+    strong =
+      Fixtures.create!(ctx, Context.person!(ctx),
+        preference: "Strong match #{word} #{second_word}"
+      )
+
     weak = Fixtures.create!(ctx, Context.person!(ctx), preference: "Weak match #{word}")
 
     body =
-      Fixtures.search!(ctx, Context.person!(ctx), %{"query" => "#{word} #{second_word}", "maxEntries" => 10})
+      Fixtures.search!(ctx, Context.person!(ctx), %{
+        "query" => "#{word} #{second_word}",
+        "maxEntries" => 10
+      })
 
     ids = Fixtures.ids(body)
     strong_at = Enum.find_index(ids, &(&1 == strong["id"]))
@@ -282,14 +306,25 @@ defmodule HcpConformance.Checks.Search do
     seed!(ctx, 3, word)
     body = Fixtures.search!(ctx, Context.person!(ctx), %{"query" => word, "maxEntries" => 1})
     present = Enum.filter(["nextCursor", "cursor", "next", "nextPage"], &Map.has_key?(body, &1))
-    Assert.check!(present == [], "a search response must not offer pagination, found #{inspect(present)}")
+
+    Assert.check!(
+      present == [],
+      "a search response must not offer pagination, found #{inspect(present)}"
+    )
   end
 
   defp audited(ctx) do
     purpose = "Conformance search " <> Context.unique_word(ctx)
-    Fixtures.search!(ctx, Context.person!(ctx), %{"query" => Context.unique_word(ctx), "purpose" => purpose})
 
-    AuditLog.await!(ctx, "preference.read", &AuditLog.event?(&1, "preference.read", purpose: purpose),
+    Fixtures.search!(ctx, Context.person!(ctx), %{
+      "query" => Context.unique_word(ctx),
+      "purpose" => purpose
+    })
+
+    AuditLog.await!(
+      ctx,
+      "preference.read",
+      &AuditLog.event?(&1, "preference.read", purpose: purpose),
       read?: true
     )
   end
@@ -307,7 +342,11 @@ defmodule HcpConformance.Checks.Search do
     found = Enum.find(body["entries"] || [], &(&1["id"] == entry["id"]))
     Assert.check!(found != nil, "the search did not return the entry it matches")
     source = Envelope.get(found, ctx.envelope_form, ["record", "provenance", "source"])
-    Assert.check!(is_binary(source), "record.provenance.source was redacted from the person's own search")
+
+    Assert.check!(
+      is_binary(source),
+      "record.provenance.source was redacted from the person's own search"
+    )
   end
 
   defp agent_redaction(ctx) do
@@ -353,7 +392,11 @@ defmodule HcpConformance.Checks.Search do
     response =
       Context.request(ctx, :post, Context.url(ctx, :search),
         token: agent.token,
-        json: %{"query" => "conformance", "categories" => [outside], "purpose" => "HCP conformance check"}
+        json: %{
+          "query" => "conformance",
+          "categories" => [outside],
+          "purpose" => "HCP conformance check"
+        }
       )
 
     Assert.problem!(response, 403, "scope-denied", "an agent searching #{outside}")
@@ -362,11 +405,17 @@ defmodule HcpConformance.Checks.Search do
   defp category_isolation(ctx) do
     agent = Context.agent!(ctx)
     other = ctx.second_category
-    if "hcp:#{other}:read" in agent.scopes, do: Assert.skip!("the agent's grant also covers #{other}")
+
+    if "hcp:#{other}:read" in agent.scopes,
+      do: Assert.skip!("the agent's grant also covers #{other}")
+
     word = Context.unique_word(ctx)
 
     outside =
-      Fixtures.create!(ctx, Context.person!(ctx), category: other, preference: "Other category #{word}")
+      Fixtures.create!(ctx, Context.person!(ctx),
+        category: other,
+        preference: "Other category #{word}"
+      )
 
     Fixtures.create!(ctx, Context.person!(ctx), preference: "Granted category #{word}")
     body = Fixtures.search!(ctx, agent.token, %{"query" => word, "maxEntries" => 10})
@@ -392,7 +441,10 @@ defmodule HcpConformance.Checks.Search do
     entry = Fixtures.create!(ctx, Context.person!(ctx), preference: preference)
 
     body =
-      Fixtures.search!(ctx, Context.person!(ctx), %{"query" => word, "responseDetail" => "minimal"})
+      Fixtures.search!(ctx, Context.person!(ctx), %{
+        "query" => word,
+        "responseDetail" => "minimal"
+      })
 
     found = Enum.find(body["entries"] || [], &(is_map(&1) and &1["id"] == entry["id"]))
     Assert.check!(found != nil, "the minimal search did not return the entry it matches")

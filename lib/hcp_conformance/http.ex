@@ -108,7 +108,8 @@ defmodule HcpConformance.HTTP do
           })
         )
 
-        raise TransportError, message: "#{method_name} #{Transcript.redact(transcript, url)}: #{message}"
+        raise TransportError,
+          message: "#{method_name} #{Transcript.redact(transcript, url)}: #{message}"
     end
   end
 
@@ -142,13 +143,17 @@ defmodule HcpConformance.HTTP do
     existing = if uri.query, do: URI.decode_query(uri.query), else: %{}
 
     merged =
-      Enum.reduce(params, existing, fn {key, value}, acc -> Map.put(acc, to_string(key), to_string(value)) end)
+      Enum.reduce(params, existing, fn {key, value}, acc ->
+        Map.put(acc, to_string(key), to_string(value))
+      end)
 
     URI.to_string(%{uri | query: URI.encode_query(merged)})
   end
 
   defp flatten_headers(headers) when is_map(headers) do
-    Enum.flat_map(headers, fn {name, values} -> Enum.map(List.wrap(values), &{String.downcase(name), &1}) end)
+    Enum.flat_map(headers, fn {name, values} ->
+      Enum.map(List.wrap(values), &{String.downcase(name), &1})
+    end)
   end
 
   defp flatten_headers(headers) when is_list(headers),
@@ -156,8 +161,11 @@ defmodule HcpConformance.HTTP do
 
   defp content_type(headers) do
     Enum.find_value(headers, fn
-      {"content-type", value} -> value |> String.split(";") |> hd() |> String.trim() |> String.downcase()
-      _other -> nil
+      {"content-type", value} ->
+        value |> String.split(";") |> hd() |> String.trim() |> String.downcase()
+
+      _other ->
+        nil
     end)
   end
 

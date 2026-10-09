@@ -134,7 +134,8 @@ defmodule HcpConformance.Checks.Conflicts do
     Assert.json_object!(response, "GET entry")["entry"] || %{}
   end
 
-  defp status_of(ctx, id), do: Envelope.get(read!(ctx, id), ctx.envelope_form, ["record", "status"])
+  defp status_of(ctx, id),
+    do: Envelope.get(read!(ctx, id), ctx.envelope_form, ["record", "status"])
 
   defp assert_quarantined(ctx, declared, inferred) do
     Assert.check!(
@@ -176,7 +177,10 @@ defmodule HcpConformance.Checks.Conflicts do
     AuditLog.await!(
       ctx,
       "conflict.detected",
-      &AuditLog.event?(&1, "conflict.detected", entryId: inferred["id"], relatedEntryId: declared["id"])
+      &AuditLog.event?(&1, "conflict.detected",
+        entryId: inferred["id"],
+        relatedEntryId: declared["id"]
+      )
     )
   end
 
@@ -249,10 +253,16 @@ defmodule HcpConformance.Checks.Conflicts do
 
   defp accept(ctx) do
     {declared, inferred, word} = pair!(ctx, :inferred_second)
-    updated = Entries.update!(ctx, Context.person!(ctx), inferred["id"], "I prefer aisle seats #{word}")
+
+    updated =
+      Entries.update!(ctx, Context.person!(ctx), inferred["id"], "I prefer aisle seats #{word}")
+
     field = &Envelope.get(updated, ctx.envelope_form, &1)
 
-    Assert.check!(field.(["record", "status"]) == "active", "an accepted inference must become active")
+    Assert.check!(
+      field.(["record", "status"]) == "active",
+      "an accepted inference must become active"
+    )
 
     Assert.check!(
       field.(["record", "declarationType"]) == "user-declared",

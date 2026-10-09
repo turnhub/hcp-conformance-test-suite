@@ -25,11 +25,18 @@ defmodule HcpConformance.Checks.Mcp do
   end
 
   defp manifest(ctx) do
-    url = ctx.endpoints.mcp_manifest || Assert.fail!("MCP is declared but mcp_manifest_endpoint is missing")
+    url =
+      ctx.endpoints.mcp_manifest ||
+        Assert.fail!("MCP is declared but mcp_manifest_endpoint is missing")
+
     response = Context.request(ctx, :get, url, token: ctx.person_token)
     Assert.status!(response, 200, "GET mcp_manifest_endpoint")
     body = Assert.json_object!(response, "MCP manifest")
-    tools = List.wrap(body["tools"]) |> Enum.map(fn tool -> if is_map(tool), do: tool["name"], else: tool end)
+
+    tools =
+      List.wrap(body["tools"])
+      |> Enum.map(fn tool -> if is_map(tool), do: tool["name"], else: tool end)
+
     missing = @tools -- tools
     Assert.check!(missing == [], "the manifest lacks tools: #{inspect(missing)}")
     Assert.check!(body["authorizationRequired"] == true, "authorizationRequired must be true")

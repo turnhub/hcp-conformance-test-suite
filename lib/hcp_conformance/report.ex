@@ -38,7 +38,11 @@ defmodule HcpConformance.Report do
       capabilities: ctx.capabilities |> MapSet.to_list() |> Enum.sort(),
       setup_notes: Enum.map(ctx.setup_notes, &Transcript.redact(ctx.transcript, &1)),
       discovery: ctx.discovery,
-      categories: %{primary: ctx.primary_category, second: ctx.second_category, outside: ctx.outside_category},
+      categories: %{
+        primary: ctx.primary_category,
+        second: ctx.second_category,
+        outside: ctx.outside_category
+      },
       results: results,
       transcript: ctx.transcript |> Transcript.exchanges() |> Enum.map(&serializable/1)
     }

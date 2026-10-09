@@ -89,7 +89,10 @@ defmodule HcpConformance.CLI do
     case HcpConformance.run(attrs, on_event: progress) do
       {:ok, report} ->
         IO.write(Report.to_text(report, verbose: opts[:verbose]))
-        if opts[:json], do: File.write!(opts[:json], Jason.encode_to_iodata!(report, pretty: true))
+
+        if opts[:json],
+          do: File.write!(opts[:json], Jason.encode_to_iodata!(report, pretty: true))
+
         exit_status(report, opts[:strict])
 
       {:error, message} ->
@@ -123,7 +126,10 @@ defmodule HcpConformance.CLI do
       |> Enum.map(fn {group, checks} ->
         lines =
           Enum.map(checks, fn check ->
-            needs = if check.requires == [], do: "—", else: Enum.map_join(check.requires, ", ", &"`#{&1}`")
+            needs =
+              if check.requires == [],
+                do: "—",
+                else: Enum.map_join(check.requires, ", ", &"`#{&1}`")
 
             "| `#{check.id}` | §#{check.section} | #{String.upcase(to_string(check.level))} | #{check.title} | #{needs} |"
           end)

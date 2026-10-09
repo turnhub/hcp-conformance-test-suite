@@ -27,6 +27,7 @@ jobs:
           key: mix-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
       - run: mix local.hex --force && mix local.rebar --force
       - run: mix deps.get
+      - run: mix deps.unlock --check-unused
       - run: mix format --check-formatted
       - run: mix compile --warnings-as-errors
       - run: mix test
@@ -38,7 +39,10 @@ jobs:
       - run: docker build -t hcp-conformance .
       - name: Smoke test the image against its own reference implementation
         run: |
-          docker run -d --name hcpc -p 4000:4000 -e PUBLIC_URL=http://127.0.0.1:4000 -e ALLOW_PRIVATE_TARGETS=true hcp-conformance
+          docker run -d --name hcpc --network host \
+            -e PORT=4000 -e BIND_ADDRESS=0.0.0.0 -e SECRET_KEY_BASE="$(openssl rand -base64 64 | tr -d '\n')" \
+            -e PHX_HOST=127.0.0.1 -e PHX_URL_SCHEME=http -e PHX_URL_PORT=4000 -e ALLOW_PRIVATE_TARGETS=true \
+            hcp-conformance
           for i in $(seq 1 30); do curl -sf http://127.0.0.1:4000/health && break; sleep 1; done
           docker run --rm --network host hcp-conformance bin/conformance \
             --target http://127.0.0.1:4000/reference \
