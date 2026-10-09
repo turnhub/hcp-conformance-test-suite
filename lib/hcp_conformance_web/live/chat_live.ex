@@ -584,84 +584,119 @@ defmodule HcpConformanceWeb.ChatLive do
   attr :name, :string, required: true
   attr :context, :any, required: true
 
-  defp context(%{context: :off} = assigns),
-    do: ~H"Vault off: nothing was asked of the vault."
-
-  defp context(%{context: :no_grant} = assigns),
-    do: ~H"{@name} holds no grant: nothing was asked of the vault."
-
-  defp context(%{context: {:refused, refusal, search}} = assigns) do
-    assigns = assign(assigns, refusal: refusal, search: search)
-
+  # What the vault was asked and what came of it, as a list under the reply:
+  # a row for the search (when there was one), and a row for the outcome.
+  defp context(%{context: context} = assigns) when context in [:off, :no_grant] do
     ~H"""
-    <.searched name={@name} search={@search} />
-    The vault refused {@name}: {@refusal.status} {@refusal.type}: {@refusal.detail}.
-    It answered without memories.
+    <ul class="list bg-base-100 rounded-box w-full">
+      <li class="list-row items-center">
+        <.icon name="hero-no-symbol" />
+        <div data-role="outcome">
+          <span :if={@context == :off}>Vault off: nothing was asked of the vault.</span>
+          <span :if={@context == :no_grant}>
+            {@name} holds no grant: nothing was asked of the vault.
+          </span>
+        </div>
+      </li>
+    </ul>
     """
   end
 
-  defp context(%{context: {:ok, [], search}} = assigns) do
-    assigns = assign(assigns, search: search)
+  defp context(%{context: {outcome, result, search}} = assigns) do
+    assigns = assign(assigns, outcome: outcome, result: result, search: search)
 
     ~H"""
-    <.searched name={@name} search={@search} />
-    <span :if={@search.method == "lexical"}>
-      The vault's search is lexical, and no memory shares a word with the query, so none was sent.
-    </span>
-    <span :if={@search.method != "lexical"}>No memory matched, so none was sent.</span>
-    """
-  end
-
-  defp context(%{context: {:ok, entries, search}} = assigns) do
-    assigns = assign(assigns, entries: entries, search: search)
-
-    ~H"""
-    <.searched name={@name} search={@search} />
-    <details class="collapse collapse-arrow bg-base-100">
-      <summary class="collapse-title">
-        Sent from the vault: {length(@entries)} {plural(length(@entries), "memory", "memories")}
-      </summary>
-      <ul class="collapse-content list">
-        <li :for={entry <- @entries} class="list-row">
-          <div>
-            {Vault.preference(entry)} <span class="badge badge-sm">{Vault.category(entry)}</span>
-          </div>
-        </li>
-      </ul>
-    </details>
+    <ul class="list bg-base-100 rounded-box w-full">
+      <.searched name={@name} search={@search} />
+      <.outcome name={@name} outcome={@outcome} result={@result} search={@search} />
+    </ul>
     """
   end
 
   attr :name, :string, required: true
   attr :search, :map, required: true
 
-  defp searched(%{search: %{chosen_by: :assistant}} = assigns) do
-    ~H"""
-    {@name} picked the search words “{@search.query}” and searched {Enum.join(
-      @search.categories,
-      ", "
-    )}.
-    """
-  end
-
-  defp searched(%{search: %{chosen_by: :person}} = assigns) do
-    ~H"""
-    {@name} searched {Enum.join(@search.categories, ", ")} for “{@search.query}”, the words you set.
-    """
-  end
-
-  defp searched(%{search: %{pick_error: _error}} = assigns) do
-    ~H"""
-    {@name} could not pick search words ({@search.pick_error}), so it searched {Enum.join(
-      @search.categories,
-      ", "
-    )} for “{@search.query}”, the message itself.
-    """
-  end
-
   defp searched(assigns) do
+    assigns = assign(assigns, words: String.split(assigns.search.query))
+
     ~H"""
-    {@name} searched {Enum.join(@search.categories, ", ")} for “{@search.query}”, the message itself.
+    <li class="list-row items-start">
+      <.icon name="hero-magnifying-glass" />
+      <div class="space-y-1">
+        <div data-role="search-by">
+          <span :if={@search[:chosen_by] == :assistant}>Search words picked by {@name}</span>
+          <span :if={@search[:chosen_by] == :person}>Search words you set</span>
+          <span :if={@search[:chosen_by] == :message}>Search words from the message itself</span>
+        </div>
+        <div :if={@search[:pick_error]} role="alert" class="alert alert-warning alert-soft">
+          <span data-role="pick-error">
+            {@name} could not pick search words ({@search.pick_error}), so the message itself was searched.
+          </span>
+        </div>
+        <div class="flex flex-wrap items-center gap-1">
+          <span :for={word <- @words} data-role="search-word" class="badge badge-sm">{word}</span>
+          <span>in</span>
+          <span
+            :for={category <- @search.categories}
+            data-role="searched-category"
+            class="badge badge-sm badge-primary badge-soft"
+          >
+            {category}
+          </span>
+        </div>
+      </div>
+    </li>
+    """
+  end
+
+  attr :name, :string, required: true
+  attr :outcome, :atom, required: true
+  attr :result, :any, required: true
+  attr :search, :map, required: true
+
+  defp outcome(%{outcome: :refused} = assigns) do
+    ~H"""
+    <li class="list-row items-start">
+      <.icon name="hero-shield-exclamation" />
+      <div data-role="outcome" class="space-y-1">
+        <div>
+          The vault refused {@name}:
+          <span class="badge badge-sm badge-error">{@result.status} {@result.type}</span>
+        </div>
+        <div>{@result.detail}. It answered without memories.</div>
+      </div>
+    </li>
+    """
+  end
+
+  defp outcome(%{result: []} = assigns) do
+    ~H"""
+    <li class="list-row items-start">
+      <.icon name="hero-inbox" />
+      <div data-role="outcome">
+        <span :if={@search.method == "lexical"}>
+          Nothing sent: no memory shares a word with these search words, and the vault's search is lexical.
+        </span>
+        <span :if={@search.method != "lexical"}>Nothing sent: no memory matched.</span>
+      </div>
+    </li>
+    """
+  end
+
+  defp outcome(assigns) do
+    ~H"""
+    <li class="list-row items-start">
+      <.icon name="hero-paper-airplane" />
+      <div data-role="outcome" class="space-y-1">
+        <div>
+          Sent {plural(length(@result), "memory", "memories", true)} to {@name}
+        </div>
+        <div :for={entry <- @result} class="flex flex-wrap items-center gap-1">
+          <span>{Vault.preference(entry)}</span>
+          <span class="badge badge-sm badge-ghost">{Vault.category(entry)}</span>
+        </div>
+      </div>
+    </li>
     """
   end
 

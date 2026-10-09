@@ -128,6 +128,15 @@ defmodule HcpConformanceWeb.ChatLiveTest do
     view |> element("#messages .chat-start:last-child [data-role=context]") |> render()
   end
 
+  # The text of each element with this role in the last reply's context.
+  defp context(view, role) do
+    view
+    |> last_context()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query("[data-role=#{role}]")
+    |> Enum.map(&(&1 |> LazyHTML.text() |> String.split() |> Enum.join(" ")))
+  end
+
   test "without a connection, the chat page sends you to connect", %{conn: conn} do
     assert {:error, {:redirect, %{to: "/"}}} = live(conn, ~p"/chat")
   end
@@ -179,7 +188,8 @@ defmodule HcpConformanceWeb.ChatLiveTest do
     ask(view, "chatgpt", "Which running shoes should I buy?")
 
     assert has_element?(view, "#messages .chat-start", @chatgpt_reply)
-    assert last_context(view) =~ "ChatGPT holds no grant"
+    assert context(view, "outcome") == ["ChatGPT holds no grant: nothing was asked of the vault."]
+    assert context(view, "search-by") == []
     %{body: %{"instructions" => instructions}} = answer_request()
     refute instructions =~ @shoes
   end
@@ -191,10 +201,12 @@ defmodule HcpConformanceWeb.ChatLiveTest do
 
     ask(view, "chatgpt", "Which running shoes should I buy?")
 
-    assert last_context(view) =~ @shoes
-
-    assert last_context(view) =~
-             "ChatGPT picked the search words “shoes running” and searched general_preferences."
+    assert context(view, "search-by") == ["Search words picked by ChatGPT"]
+    assert context(view, "search-word") == ["shoes", "running"]
+    assert context(view, "searched-category") == ["general_preferences"]
+    assert [sent] = context(view, "outcome")
+    assert sent =~ "Sent 1 memory to ChatGPT"
+    assert sent =~ @shoes
 
     assert has_element?(view, "#calls details:first-child", "ChatGPT searched the vault")
     assert has_element?(view, "#calls details:first-child", "/v1/preferences/search")
@@ -216,7 +228,9 @@ defmodule HcpConformanceWeb.ChatLiveTest do
 
     ask(view, "chatgpt", "Which running shoes should I buy?")
 
-    assert last_context(view) =~ "The vault refused ChatGPT: 401 invalid-token"
+    assert [refused] = context(view, "outcome")
+    assert refused =~ "The vault refused ChatGPT: 401 invalid-token"
+    assert refused =~ "It answered without memories."
     %{body: %{"instructions" => instructions}} = answer_request()
     refute instructions =~ @shoes
   end
@@ -228,13 +242,12 @@ defmodule HcpConformanceWeb.ChatLiveTest do
 
     ask(view, "chatgpt", "What do you know about me?", %{pick_words: "false"})
 
-    context = last_context(view)
-
-    assert context =~
-             "searched general_preferences for “What do you know about me?”, the message itself."
-
-    assert context =~ "no memory shares a word with the query"
-    assert context =~ "lexical"
+    assert context(view, "search-by") == ["Search words from the message itself"]
+    assert context(view, "search-word") == ~w(What do you know about me?)
+    assert [nothing] = context(view, "outcome")
+    assert nothing =~ "Nothing sent"
+    assert nothing =~ "no memory shares a word with these search words"
+    assert nothing =~ "lexical"
   end
 
   test "for a broad question, the assistant picks the words the vault is searched for", %{
@@ -246,9 +259,8 @@ defmodule HcpConformanceWeb.ChatLiveTest do
 
     ask(view, "chatgpt", "What do you know about me?")
 
-    assert last_context(view) =~
-             "ChatGPT picked the search words “shoes running” and searched general_preferences."
-
+    assert context(view, "search-by") == ["Search words picked by ChatGPT"]
+    assert context(view, "search-word") == ["shoes", "running"]
     assert last_context(view) =~ @shoes
 
     %{body: %{"instructions" => picking, "input" => asked}} = picking_request()
@@ -277,8 +289,13 @@ defmodule HcpConformanceWeb.ChatLiveTest do
 
     ask(view, "chatgpt", "Which running shoes should I buy?")
 
-    assert last_context(view) =~
-             "ChatGPT could not pick search words (OpenAI answered 500: overloaded), so it searched general_preferences for “Which running shoes should I buy?”, the message itself."
+    assert context(view, "search-by") == ["Search words from the message itself"]
+
+    assert context(view, "pick-error") == [
+             "ChatGPT could not pick search words (OpenAI answered 500: overloaded), so the message itself was searched."
+           ]
+
+    assert context(view, "search-word") == ~w(Which running shoes should I buy?)
 
     assert last_context(view) =~ @shoes
   end
@@ -298,8 +315,8 @@ defmodule HcpConformanceWeb.ChatLiveTest do
 
     ask(view, "chatgpt", "What do you know about me?", %{query: "running shoes"})
 
-    assert last_context(view) =~
-             "searched general_preferences for “running shoes”, the words you set."
+    assert context(view, "search-by") == ["Search words you set"]
+    assert context(view, "search-word") == ["running", "shoes"]
 
     assert last_context(view) =~ @shoes
 
@@ -315,8 +332,9 @@ defmodule HcpConformanceWeb.ChatLiveTest do
 
     ask(view, "chatgpt", "What is my diet?", %{categories: ["health_context"]})
 
-    assert last_context(view) =~ "and searched health_context."
-    assert last_context(view) =~ "The vault refused ChatGPT: 403 scope-denied"
+    assert context(view, "searched-category") == ["health_context"]
+    assert [refused] = context(view, "outcome")
+    assert refused =~ "The vault refused ChatGPT: 403 scope-denied"
   end
 
   test "a grant narrowed to one memory says so", %{conn: conn} do
@@ -373,7 +391,7 @@ defmodule HcpConformanceWeb.ChatLiveTest do
 
     ask(view, "chatgpt", "Which running shoes should I buy?", %{use_vault: "false"})
 
-    assert last_context(view) =~ "Vault off"
+    assert context(view, "outcome") == ["Vault off: nothing was asked of the vault."]
     refute has_element?(view, "#calls", "searched the vault")
   end
 
