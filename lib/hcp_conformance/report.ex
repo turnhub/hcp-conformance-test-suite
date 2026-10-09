@@ -44,15 +44,8 @@ defmodule HcpConformance.Report do
         outside: ctx.outside_category
       },
       results: results,
-      transcript: ctx.transcript |> Transcript.exchanges() |> Enum.map(&serializable/1)
+      transcript: ctx.transcript |> Transcript.exchanges() |> Enum.map(&Transcript.serializable/1)
     }
-  end
-
-  # Headers are tuples in the transcript; JSON wants pairs.
-  defp serializable(exchange) do
-    exchange
-    |> Map.update!(:request_headers, &Enum.map(&1, fn {name, value} -> [name, value] end))
-    |> Map.update!(:response_headers, &Enum.map(&1, fn {name, value} -> [name, value] end))
   end
 
   @spec verdict([map()]) :: String.t()

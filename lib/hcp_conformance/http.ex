@@ -41,7 +41,8 @@ defmodule HcpConformance.HTTP do
           params: keyword() | map(),
           headers: [{String.t(), String.t()}],
           kind: :target | :hook,
-          timeout: pos_integer()
+          timeout: pos_integer(),
+          secret_fields: [String.t()]
         ]
 
   @doc """
@@ -70,8 +71,9 @@ defmodule HcpConformance.HTTP do
       response_headers = flatten_headers(response.headers)
       raw = IO.iodata_to_binary(response.body || "")
       json = decode(raw)
+      register_secrets(transcript, json, Keyword.get(opts, :secret_fields, []))
 
-      id =
+      %{id: id} =
         Transcript.record(
           transcript,
           Map.merge(exchange, %{
@@ -112,6 +114,18 @@ defmodule HcpConformance.HTTP do
           message: "#{method_name} #{Transcript.redact(transcript, url)}: #{message}"
     end
   end
+
+  # Credentials a response hands out (a hook's tokens) are secrets from the
+  # moment they arrive: registered before the exchange is recorded or streamed.
+  defp register_secrets(transcript, %{} = json, fields) do
+    for field <- fields, value = json[field], is_binary(value) do
+      Transcript.add_secret(transcript, value)
+    end
+
+    :ok
+  end
+
+  defp register_secrets(_transcript, _json, _fields), do: :ok
 
   defp send_request(method, url, headers, body, opts) do
     Req.request(

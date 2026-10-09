@@ -55,6 +55,31 @@ defmodule HcpConformanceWeb.RunLiveTest do
     assert %{"verdict" => "pass", "partial" => true} = Jason.decode!(content)
   end
 
+  test "the HTTP log streams every exchange, headers and bodies both ways, redacted", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(connected(conn), ~p"/run")
+
+    view |> form("#run-form", run: %{groups: only(["discovery", "entries"])}) |> render_submit()
+    render_async(view, 60_000)
+
+    view |> element("#tab-log") |> render_click()
+    refute has_element?(view, "#log-panel.hidden")
+    assert has_element?(view, "#results-panel.hidden")
+
+    html = view |> element("#exchanges") |> render()
+    document = LazyHTML.from_fragment(html)
+    assert Enum.count(LazyHTML.query(document, "details")) > 10
+
+    assert html =~ "authorization: Bearer [redacted]"
+    assert html =~ "content-type: application/ld+json"
+    assert html =~ "POST /reference/v1/preferences"
+    assert html =~ "&quot;hcp_version&quot;: &quot;1.0&quot;"
+    refute html =~ "ref-person-"
+    refute html =~ "ref-grant-"
+    refute html =~ "reference-hook-secret"
+  end
+
   test "a failing target lists its findings with the HTTP exchanges", %{conn: conn} do
     target = HcpConformance.ReferenceTarget.start!(faults: [:not_found_for_agent])
 

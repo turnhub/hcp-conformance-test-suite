@@ -20,7 +20,8 @@ defmodule HcpConformance.Hook do
       HTTP.request(transcript, allow_private, :post, hook_url <> "/subjects",
         token: secret,
         json: %{"purpose" => "HCP conformance run"},
-        kind: :hook
+        kind: :hook,
+        secret_fields: ["personToken"]
       )
 
     case response do
@@ -44,6 +45,7 @@ defmodule HcpConformance.Hook do
     url = hook_url <> "/subjects/" <> URI.encode(subject_id, &URI.char_unreserved?/1) <> "/grants"
 
     case HTTP.request(transcript, allow_private, :post, url,
+           secret_fields: ["token"],
            token: secret,
            json: attrs,
            kind: :hook

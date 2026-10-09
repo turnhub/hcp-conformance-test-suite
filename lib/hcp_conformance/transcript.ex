@@ -31,9 +31,16 @@ defmodule HcpConformance.Transcript do
           duration_ms: non_neg_integer()
         }
 
+  @doc """
+  Starts a transcript. `on_exchange` is called with each exchange as it is
+  recorded, already redacted, in the process that made the request: the live
+  HTTP log in the UI is fed from it.
+  """
   @spec start_link(keyword()) :: Agent.on_start()
-  def start_link(_opts \\ []),
-    do: Agent.start_link(fn -> %{exchanges: [], secrets: [], next_id: 1} end)
+  def start_link(opts \\ []) do
+    listener = Keyword.get(opts, :on_exchange)
+    Agent.start_link(fn -> %{exchanges: [], secrets: [], next_id: 1, listener: listener} end)
+  end
 
   @doc "Registers a value to redact from everything recorded from now on, and from what is already stored."
   @spec add_secret(pid(), String.t() | nil) :: :ok
@@ -52,14 +59,33 @@ defmodule HcpConformance.Transcript do
     end)
   end
 
-  @doc "Records an exchange; returns its id."
-  @spec record(pid(), map()) :: pos_integer()
+  @doc """
+  Records an exchange, redacted with every secret registered so far, and hands it
+  to the listener. Returns the stored exchange. Register secrets that arrive in a
+  response (`HcpConformance.HTTP`'s `secret_fields`) before recording it, or the
+  listener sees them.
+  """
+  @spec record(pid(), map()) :: exchange()
   def record(pid, exchange) do
-    Agent.get_and_update(pid, fn state ->
-      id = state.next_id
-      stored = exchange |> Map.put(:id, id) |> truncate() |> redact_exchange(state.secrets)
-      {id, %{state | exchanges: [stored | state.exchanges], next_id: id + 1}}
-    end)
+    {stored, listener} =
+      Agent.get_and_update(pid, fn state ->
+        id = state.next_id
+        stored = exchange |> Map.put(:id, id) |> truncate() |> redact_exchange(state.secrets)
+
+        {{stored, state.listener},
+         %{state | exchanges: [stored | state.exchanges], next_id: id + 1}}
+      end)
+
+    if listener, do: listener.(stored)
+    stored
+  end
+
+  @doc "An exchange as plain JSON-encodable data: headers become `[name, value]` pairs."
+  @spec serializable(exchange()) :: map()
+  def serializable(exchange) do
+    exchange
+    |> Map.update!(:request_headers, &Enum.map(&1, fn {name, value} -> [name, value] end))
+    |> Map.update!(:response_headers, &Enum.map(&1, fn {name, value} -> [name, value] end))
   end
 
   @doc "All exchanges, oldest first."
@@ -76,10 +102,22 @@ defmodule HcpConformance.Transcript do
     |> Map.update(:response_body, nil, &truncate_body/1)
   end
 
-  defp truncate_body(body) when is_binary(body) and byte_size(body) > @max_body_bytes,
-    do: binary_part(body, 0, @max_body_bytes) <> "…[truncated]"
+  # Bodies end up in JSON (the report, the live log), so they must stay valid
+  # UTF-8: a cut lands on a character boundary, and a body that is not text at
+  # all is replaced by a note.
+  defp truncate_body(nil), do: nil
 
-  defp truncate_body(body), do: body
+  defp truncate_body(body) when byte_size(body) > @max_body_bytes do
+    case :unicode.characters_to_binary(binary_part(body, 0, @max_body_bytes)) do
+      text when is_binary(text) -> text <> "…[truncated]"
+      {:incomplete, text, _rest} -> text <> "…[truncated]"
+      {:error, _text, _rest} -> binary_note(body)
+    end
+  end
+
+  defp truncate_body(body), do: if(String.valid?(body), do: body, else: binary_note(body))
+
+  defp binary_note(body), do: "[binary body, #{byte_size(body)} bytes]"
 
   defp redact_exchange(exchange, secrets) do
     exchange
@@ -90,10 +128,19 @@ defmodule HcpConformance.Transcript do
     |> Map.update(:request_headers, [], fn headers ->
       Enum.map(headers, &redact_header(&1, secrets))
     end)
+    |> Map.update(:response_headers, [], fn headers ->
+      Enum.map(headers, &redact_header(&1, secrets))
+    end)
   end
 
-  defp redact_header({name, _value}, _secrets) when name in ["authorization"],
-    do: {name, "Bearer [redacted]"}
+  # Credentials travel in headers too: the suite's bearer, and any session a
+  # target hands back.
+  defp redact_header({"authorization", _value}, _secrets),
+    do: {"authorization", "Bearer [redacted]"}
+
+  defp redact_header({name, _value}, _secrets)
+       when name in ["proxy-authorization", "cookie", "set-cookie"],
+       do: {name, "[redacted]"}
 
   defp redact_header({name, value}, secrets), do: {name, redact_string(value, secrets)}
 

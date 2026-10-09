@@ -23,17 +23,19 @@ defmodule HcpConformance.Runner do
 
   @transports [:rest, :mcp]
 
-  @type event :: {:started, map()} | {:result, map()} | {:finished, map()}
+  @type event ::
+          {:started, map()} | {:exchange, map()} | {:result, map()} | {:finished, map()}
 
   @doc """
-  Runs a conformance run. `opts[:on_event]` receives progress events
-  (`{:started, info}`, `{:result, result}`, `{:finished, report}`).
+  Runs a conformance run. `opts[:on_event]` receives progress events:
+  `{:started, info}`, `{:exchange, exchange}` for every HTTP exchange as it is
+  made (redacted), `{:result, result}`, and `{:finished, report}`.
   """
   @spec run(Config.t(), keyword()) :: map()
   def run(%Config{} = config, opts \\ []) do
     notify = Keyword.get(opts, :on_event, fn _event -> :ok end)
     started_at = DateTime.utc_now()
-    ctx = Context.start(config)
+    ctx = Context.start(config, on_exchange: &notify.({:exchange, Transcript.serializable(&1)}))
     checks = Catalog.select(config.groups, config.only)
     {main, post} = Enum.split_with(checks, &(&1.phase == :main))
 

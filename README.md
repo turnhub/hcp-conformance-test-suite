@@ -45,8 +45,19 @@ exists for.
 Open the hosted instance and connect: give the HCP base URL and either the
 conformance hook (a full run) or existing tokens (a partial run). Then pick the
 groups and press **Run the suite**. Results stream in as each check finishes.
-When the run ends, each failure expands to the requests and responses behind
-it, and the full report downloads as JSON. **Use the reference implementation**
+The **HTTP log** tab shows every request the suite makes, live, as it makes
+it. Each entry gives the method and path, the status, the check that made it,
+and the time taken. Expanded, it shows the request headers and body and the
+response headers and body. JSON bodies are pretty-printed. When the run ends, each
+failure expands to the requests and responses behind it, and the full report
+downloads as JSON.
+
+Credentials are redacted everywhere: in the live log, the findings and the report.
+That covers the suite's bearer tokens, the hook secret, the tokens the hook hands
+out (registered as secrets before their response is shown) and cookies in either
+direction. The log is fed straight from the run to your page. It is not written
+to the server's logs, so other people's payloads never land in the operator's
+log files. **Use the reference implementation**
 shows a passing run without any setup.
 
 The app is stateless. The connection, credentials included, is kept in your
@@ -248,7 +259,7 @@ over `Hcp.issue_grant` and `Tokens.generate`.
 
 ```bash
 mix setup
-mix test           # 60 tests, about 10 seconds; no network beyond localhost
+mix test           # 64 tests, about 10 seconds; no network beyond localhost
 mix precommit      # warnings as errors, unused deps, format, tests
 mix hcp.checks > docs/CHECKS.md    # after adding or changing a check; a test enforces it
 ```

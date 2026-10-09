@@ -42,10 +42,13 @@ defmodule HcpConformance.Context do
   @spec registered_categories() :: [String.t()]
   def registered_categories, do: @registered_categories
 
-  @doc "Sets up a run. Never raises: problems become setup notes and missing capabilities."
-  @spec start(Config.t()) :: t()
-  def start(%Config{} = config) do
-    {:ok, transcript} = Transcript.start_link()
+  @doc """
+  Sets up a run. Never raises: problems become setup notes and missing
+  capabilities. `on_exchange` receives each HTTP exchange as it is recorded.
+  """
+  @spec start(Config.t(), keyword()) :: t()
+  def start(%Config{} = config, opts \\ []) do
+    {:ok, transcript} = Transcript.start_link(on_exchange: opts[:on_exchange])
     {:ok, state} = Agent.start_link(fn -> %{entries: [], grants: []} end)
 
     Enum.each(
