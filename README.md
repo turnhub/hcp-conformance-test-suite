@@ -46,6 +46,16 @@ press **Run the suite**. The page refreshes until the run finishes. Each finding
 expands to the requests and responses behind it. **Run against the reference
 implementation** shows a passing run without any setup.
 
+### Locally, in the browser
+
+```bash
+mix deps.get
+mix hcp.server          # http://localhost:4000, reference implementation at /reference
+```
+
+This is a Plug and Bandit app, not Phoenix, so `mix hcp.server` stands in for
+`mix phx.server`. Locally, targets on localhost and private networks are allowed.
+
 ### CLI with Mix
 
 ```bash
@@ -186,9 +196,10 @@ gcloud run deploy hcp-conformance --source . --port 4000 \
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
+| `SERVE` | `true` in the image | Start the web runner. `mix hcp.server` sets it for you. |
 | `PORT` | `4000` | Listening port. |
 | `PUBLIC_URL` | derived from the request | The instance's public URL, for links and the reference implementation's discovery document. |
-| `ALLOW_PRIVATE_TARGETS` | `false` | Allow targets on loopback and private networks. Leave off on a public instance. |
+| `ALLOW_PRIVATE_TARGETS` | `false` in the image, `true` locally | Allow targets on loopback and private networks. Leave off on a public instance. |
 | `MAX_CONCURRENT_RUNS` | `4` | Runs at once; more answer 429. |
 | `UI_BASIC_AUTH` | unset | `user:password` to put the runner behind basic auth. `/health` and `/reference` stay open. |
 | `REFERENCE_SERVER` | `true` | Serve the reference implementation at `/reference`. |

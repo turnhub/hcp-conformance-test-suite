@@ -110,14 +110,15 @@ defmodule HcpConformance.Checks.Audit do
       end)
       |> Enum.uniq()
 
-    Assert.check!(
-      violations == [],
-      Enum.take(violations, 5) |> Enum.join("; ") |> then(&(&1 <> more(violations)))
-    )
+    if violations != [], do: Assert.fail!(summarize(violations))
   end
 
-  defp more(list) when length(list) > 5, do: " (and #{length(list) - 5} more)"
-  defp more(_list), do: ""
+  # The first few violations, and how many more there are.
+  defp summarize(violations) do
+    {shown, rest} = Enum.split(violations, 5)
+    suffix = if rest == [], do: "", else: " (and #{length(rest)} more)"
+    Enum.join(shown, "; ") <> suffix
+  end
 
   defp pagination(ctx) do
     ensure_events!(ctx, 3)

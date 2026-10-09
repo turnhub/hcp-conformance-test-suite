@@ -8,7 +8,9 @@ if config_env() != :test do
   config :hcp_conformance,
     serve: truthy?.(System.get_env("SERVE", if(config_env() == :prod, do: "true", else: "false"))),
     port: String.to_integer(System.get_env("PORT", "4000")),
-    allow_private_targets: truthy?.(System.get_env("ALLOW_PRIVATE_TARGETS", "false")),
+    # A local runner usually tests something on localhost; a deployed one must not.
+    allow_private_targets:
+      truthy?.(System.get_env("ALLOW_PRIVATE_TARGETS", if(config_env() == :prod, do: "false", else: "true"))),
     max_concurrent_runs: String.to_integer(System.get_env("MAX_CONCURRENT_RUNS", "4")),
     basic_auth: System.get_env("UI_BASIC_AUTH"),
     reference_server: truthy?.(System.get_env("REFERENCE_SERVER", "true")),
