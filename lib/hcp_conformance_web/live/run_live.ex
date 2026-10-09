@@ -1,10 +1,11 @@
 defmodule HcpConformanceWeb.RunLive do
   @moduledoc """
   Runs the suite against the target in the session and streams results as they
-  arrive. Each result folds in the HTTP exchanges its check made: method, URL,
-  headers and bodies both ways, with credentials redacted. Setup and teardown
-  traffic gets rows of its own, in the order it happened, and a result that did
-  not pass opens on its exchanges.
+  arrive, grouped as the checkboxes group them. Each result folds in the HTTP
+  exchanges its check made: method, URL, headers and bodies both ways, with
+  credentials redacted. Setup and teardown traffic gets rows of its own, in the
+  order it happened. A group opens when one of its results did not pass, and so
+  does that result, on its exchanges.
 
   The run is a LiveView async task, linked to this page: closing the tab stops
   it. Its report lives in this process only, offered as a JSON download, and is
@@ -17,6 +18,9 @@ defmodule HcpConformanceWeb.RunLive do
   alias HcpConformanceWeb.Exchanges
 
   @statuses [:pass, :fail, :warn, :skip, :error, :na]
+
+  # Statuses that open a result, and its group.
+  @problems [:fail, :warn, :error]
 
   @stat_labels [
     pass: "Passed",
@@ -49,12 +53,11 @@ defmodule HcpConformanceWeb.RunLive do
            group_counts: group_counts(),
            total_checks: length(Catalog.all()),
            stat_labels: @stat_labels,
+           statuses: @statuses,
            filters: @filters
          )
          |> select(Catalog.groups())
-         |> reset_run()
-         |> stream_configure(:results, dom_id: &dom_id/1)
-         |> stream(:results, [])}
+         |> reset_run()}
 
       {:error, message} ->
         {:ok, socket |> put_flash(:error, message) |> redirect(to: ~p"/")}
@@ -76,8 +79,13 @@ defmodule HcpConformanceWeb.RunLive do
       # Exchanges of the check (or setup, or teardown) still running, by check
       # id, newest first; they join its row when it finishes.
       pending: %{},
-      # The group of the last result streamed, to divide the list by group.
-      last_group: nil,
+      # The groups the run covers, in catalog order; their results as
+      # {dom_id, result}, in the order they arrived; and their counts by status.
+      run_groups: [],
+      rows: %{},
+      tally: %{},
+      # Setup and teardown rows, in the order they happened.
+      phases: [],
       # Setup's exchanges by id, kept for the results that cite them (the
       # discovery checks judge the document setup fetched).
       setup: %{},
@@ -248,8 +256,20 @@ defmodule HcpConformanceWeb.RunLive do
         </.button>
       </div>
 
-      <div id="results" phx-update="stream" class="space-y-2">
-        <.row :for={{dom_id, item} <- @streams.results} id={dom_id} item={item} />
+      <div id="results" class="space-y-2">
+        <div :if={@phases != []} id="phases" class="space-y-2">
+          <.row :for={{id, row} <- @phases} :key={id} id={id} result={row} />
+        </div>
+        <.group_section
+          :for={group <- @run_groups}
+          :key={group}
+          group={group}
+          rows={Map.get(@rows, group, [])}
+          tally={Map.get(@tally, group, %{})}
+          total={@group_counts[group].checks}
+          running={@running}
+          statuses={@statuses}
+        />
       </div>
 
       <script :type={Phoenix.LiveView.ColocatedHook} name=".Download">
@@ -270,25 +290,64 @@ defmodule HcpConformanceWeb.RunLive do
     """
   end
 
-  attr :id, :string, required: true
-  attr :item, :map, required: true
+  attr :group, :string, required: true
+  attr :rows, :list, required: true
+  attr :tally, :map, required: true
+  attr :total, :integer, required: true
+  attr :running, :boolean, required: true
+  attr :statuses, :list, required: true
 
-  defp row(%{item: %{divider: group}} = assigns) do
-    assigns = assign(assigns, group: group)
+  # Open when a result did not pass. The server decides that on first render
+  # only: after that, the person's own toggling wins, and a result that fails
+  # later opens its group from the browser (see `row/1`).
+  defp group_section(assigns) do
+    assigns =
+      assign(assigns,
+        done: assigns.tally |> Map.values() |> Enum.sum(),
+        problem: assigns.tally |> Map.keys() |> Enum.any?(&problem?/1)
+      )
 
     ~H"""
-    <div id={@id} class="divider">{@group}</div>
+    <details
+      id={"results-" <> @group}
+      data-group={@group}
+      open={@problem}
+      phx-mounted={JS.ignore_attributes("open")}
+      class="collapse collapse-arrow border border-base-300 bg-base-100"
+    >
+      <summary class="collapse-title">
+        <div class="flex flex-wrap items-center gap-2">
+          <h3 class="card-title text-base">{@group}</h3>
+          <span
+            :for={status <- @statuses}
+            :if={@tally[status]}
+            class={["badge badge-sm", status_class(status)]}
+          >
+            {tally_label(status, @tally[status])}
+          </span>
+          <span :if={@running and @done < @total} class="badge badge-sm badge-ghost">
+            {@done} of {@total}
+          </span>
+        </div>
+      </summary>
+      <div class="collapse-content space-y-2">
+        <p :if={@rows == []}>Waiting for its first result.</p>
+        <.row :for={{id, row} <- @rows} :key={id} id={id} result={row} />
+      </div>
+    </details>
     """
   end
 
-  defp row(%{item: result} = assigns) do
-    assigns = assign(assigns, result: result)
+  attr :id, :string, required: true
+  attr :result, :map, required: true
 
+  defp row(assigns) do
     ~H"""
     <details
       id={@id}
       data-status={@result.status || "phase"}
-      open={@result.status in [:fail, :warn, :error]}
+      open={problem?(@result.status)}
+      phx-mounted={row_mounted(@result.status)}
       class="collapse collapse-arrow bg-base-200"
     >
       <summary class="collapse-title">
@@ -346,8 +405,7 @@ defmodule HcpConformanceWeb.RunLive do
         {:noreply,
          socket
          |> reset_run()
-         |> assign(running: true)
-         |> stream(:results, [], reset: true)
+         |> assign(running: true, run_groups: run_groups(groups))
          |> start_async(:run, fn -> Runs.run(config, on_event: on_event) end)}
 
       {:error, message} ->
@@ -371,6 +429,9 @@ defmodule HcpConformanceWeb.RunLive do
   end
 
   defp selected_groups(_none), do: nil
+
+  defp run_groups(nil), do: Catalog.groups()
+  defp run_groups(groups), do: Enum.filter(Catalog.groups(), &(&1 in groups))
 
   @impl true
   def handle_info({:run_event, {:started, info}}, socket) do
@@ -399,6 +460,7 @@ defmodule HcpConformanceWeb.RunLive do
   end
 
   def handle_info({:run_event, {:result, result}}, socket) do
+    socket = insert_phases(socket)
     {own, pending} = Map.pop(socket.assigns.pending, result.id, [])
     own = Enum.reverse(own)
     own_ids = MapSet.new(own, & &1.id)
@@ -409,14 +471,15 @@ defmodule HcpConformanceWeb.RunLive do
           entry = socket.assigns.setup[id],
           do: entry
 
+    row = {dom_id(result.id), %{result | exchanges: cited ++ own}}
+
     {:noreply,
      socket
-     |> insert_phases()
-     |> insert_group(result.group)
      |> assign(pending: pending, current: nil)
      |> update(:done, &(&1 + 1))
      |> update(:counts, &Map.update!(&1, result.status, fn count -> count + 1 end))
-     |> stream_insert(:results, %{result | exchanges: cited ++ own})}
+     |> update(:rows, &Map.update(&1, result.group, [row], fn rows -> rows ++ [row] end))
+     |> update(:tally, &tally(&1, result.group, result.status))}
   end
 
   def handle_info({:run_event, {:finished, _report}}, socket),
@@ -460,7 +523,7 @@ defmodule HcpConformanceWeb.RunLive do
         socket
         |> assign(pending: pending)
         |> remember_setup(phase, exchanges)
-        |> stream_insert(:results, phase_row(phase, exchanges))
+        |> update(:phases, &(&1 ++ [{dom_id(phase), phase_row(phase, exchanges)}]))
     end
   end
 
@@ -511,17 +574,35 @@ defmodule HcpConformanceWeb.RunLive do
     end)
   end
 
-  defp dom_id(%{divider: group}), do: "divider-" <> group
-  defp dom_id(%{id: id}), do: "result-" <> String.replace(id, ".", "-")
+  @spec dom_id(String.t()) :: String.t()
+  defp dom_id(id), do: "result-" <> String.replace(id, ".", "-")
 
-  # A divider goes in before the first result of each group.
-  defp insert_group(%{assigns: %{last_group: group}} = socket, group), do: socket
-
-  defp insert_group(socket, group) do
-    socket
-    |> assign(last_group: group)
-    |> stream_insert(:results, %{divider: group})
+  @spec tally(map(), String.t(), atom()) :: map()
+  defp tally(tally, group, status) do
+    Map.update(tally, group, %{status => 1}, &Map.update(&1, status, 1, fn n -> n + 1 end))
   end
+
+  # A row that did not pass opens the group it lands in, however that group
+  # was left; every row keeps its own open state through later updates.
+  defp row_mounted(status) when status in @problems do
+    "open"
+    |> JS.ignore_attributes()
+    |> JS.set_attribute({"open", ""}, to: {:closest, "[data-group]"})
+  end
+
+  defp row_mounted(_status), do: JS.ignore_attributes("open")
+
+  @spec problem?(atom()) :: boolean()
+  defp problem?(status), do: status in @problems
+
+  defp tally_label(:pass, count), do: "#{count} passed"
+  defp tally_label(:fail, count), do: "#{count} failed"
+  defp tally_label(:skip, count), do: "#{count} skipped"
+  defp tally_label(:na, count), do: "#{count} N/A"
+  defp tally_label(:warn, 1), do: "1 warning"
+  defp tally_label(:warn, count), do: "#{count} warnings"
+  defp tally_label(:error, 1), do: "1 error"
+  defp tally_label(:error, count), do: "#{count} errors"
 
   defp mode_note(:hook),
     do:
@@ -534,7 +615,7 @@ defmodule HcpConformanceWeb.RunLive do
   defp mode_note(:anonymous),
     do: "No credentials: only checks that need none can run; the rest are skipped."
 
-  # Shows the results with these statuses, client-side; group dividers stay.
+  # Shows the results with these statuses, client-side; the groups stay.
   defp filter(id, statuses) do
     js =
       JS.remove_class("btn-active", to: "#result-filter .btn")
@@ -542,12 +623,12 @@ defmodule HcpConformanceWeb.RunLive do
 
     case statuses do
       nil ->
-        JS.show(js, to: "#results > [data-status]")
+        JS.show(js, to: "#results [data-status]")
 
       statuses ->
         js
-        |> JS.hide(to: "#results > [data-status]")
-        |> JS.show(to: Enum.map_join(statuses, ", ", &"#results > [data-status=#{&1}]"))
+        |> JS.hide(to: "#results [data-status]")
+        |> JS.show(to: Enum.map_join(statuses, ", ", &"#results [data-status=#{&1}]"))
     end
   end
 

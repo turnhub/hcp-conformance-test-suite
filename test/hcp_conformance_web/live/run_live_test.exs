@@ -66,9 +66,12 @@ defmodule HcpConformanceWeb.RunLiveTest do
 
     assert view |> element("#stat-pass .stat-value") |> render() =~ "14"
     assert view |> element("#stat-fail .stat-value") |> render() =~ "0"
-    assert has_element?(view, "#results #divider-discovery", "discovery")
-    assert has_element?(view, "#results #divider-transport", "transport")
-    assert has_element?(view, "#result-discovery-served[data-status=pass]")
+    assert has_element?(view, "#results-discovery summary", "discovery")
+    assert has_element?(view, "#results-discovery summary", "10 passed")
+    assert has_element?(view, "#results-transport summary", "4 passed")
+    refute has_element?(view, "#results-discovery[open]")
+    refute has_element?(view, "#results-entries")
+    assert has_element?(view, "#results-discovery #result-discovery-served[data-status=pass]")
     assert has_element?(view, "#result-filter #filter-not-passed")
   end
 
@@ -136,10 +139,10 @@ defmodule HcpConformanceWeb.RunLiveTest do
 
     ids =
       view
-      |> element("#results")
+      |> element("#phases")
       |> render()
       |> LazyHTML.from_fragment()
-      |> LazyHTML.query("#results > details")
+      |> LazyHTML.query("#phases > details")
       |> LazyHTML.attribute("id")
 
     assert hd(ids) == "result-setup"
@@ -164,7 +167,9 @@ defmodule HcpConformanceWeb.RunLiveTest do
     render_async(view, 60_000)
 
     assert has_element?(view, "#verdict[data-verdict=fail]")
-    assert has_element?(view, "#result-entries-nonexistent_is_403[open]", "404")
+    assert has_element?(view, "#results-entries[open]")
+    assert has_element?(view, "#results-entries summary", "1 failed")
+    assert has_element?(view, "#results-entries #result-entries-nonexistent_is_403[open]", "404")
     refute has_element?(view, "#result-entries-add[open]")
     refute render(view) =~ target.hook_secret
   end
