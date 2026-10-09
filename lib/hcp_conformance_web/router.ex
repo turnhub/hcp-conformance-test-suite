@@ -29,8 +29,8 @@ defmodule HcpConformanceWeb.Router do
     delete "/session", SessionController, :delete
     live "/run", RunLive
     live "/chat", ChatLive
-    post "/chat/openai", ChatController, :create
-    delete "/chat/openai", ChatController, :delete
+    post "/chat/keys", ChatController, :create
+    delete "/chat/keys/:assistant", ChatController, :delete
     get "/checks", PageController, :checks
     get "/hook", PageController, :hook
   end

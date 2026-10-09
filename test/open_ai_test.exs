@@ -1,8 +1,7 @@
 defmodule HcpConformance.OpenAITest do
   use ExUnit.Case, async: true
 
-  alias HcpConformance.OpenAI
-  alias HcpConformance.OpenAIStub
+  alias HcpConformance.{AssistantStub, OpenAI}
 
   @conversation [
     %{role: "user", text: "Hi"},
@@ -13,12 +12,12 @@ defmodule HcpConformance.OpenAITest do
   defp settings(base_url), do: [key: "sk-test-key", model: "gpt-5.4-mini", base_url: base_url]
 
   test "sends the instructions and the conversation, unstored, and returns the reply's text" do
-    base = OpenAIStub.start!(self(), OpenAIStub.reply("Try a stability shoe."))
+    base = AssistantStub.start!(self(), AssistantStub.reply("Try a stability shoe."))
 
     assert OpenAI.respond("Use these memories.", @conversation, settings(base)) ==
              {:ok, "Try a stability shoe."}
 
-    assert_received {:openai_request,
+    assert_received {:assistant_request,
                      %{
                        path: "/v1/responses",
                        authorization: ["Bearer sk-test-key"],
@@ -43,7 +42,7 @@ defmodule HcpConformance.OpenAITest do
       }
     }
 
-    base = OpenAIStub.start!(self(), {401, error})
+    base = AssistantStub.start!(self(), {401, error})
 
     assert OpenAI.respond("", @conversation, settings(base)) ==
              {:error, "OpenAI answered 401: Incorrect API key provided: [redacted]."}

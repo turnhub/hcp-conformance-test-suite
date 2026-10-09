@@ -21,7 +21,7 @@ defmodule HcpConformance do
 
   # The suite: checks, runner, reports. It knows nothing of the web layer or the
   # reference implementation, which it tests like any other target.
-  use Boundary, deps: [], exports: [Catalog, CLI, Config, Memory, OpenAI, Runs, Settings]
+  use Boundary, deps: [], exports: [Assistants, Catalog, CLI, Config, Runs, Settings, Vault]
 
   alias HcpConformance.{Config, Runner}
 

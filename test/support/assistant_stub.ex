@@ -1,14 +1,15 @@
-defmodule HcpConformance.OpenAIStub do
+defmodule HcpConformance.AssistantStub do
   @moduledoc """
-  A stand-in for OpenAI's Responses API on a random local port. It answers every
-  request with one canned response and sends what it received to the test.
+  A stand-in for OpenAI's Responses API or Anthropic's Messages API on a random
+  local port. It answers every request with one canned response and sends what
+  it received to the test.
   """
 
   @behaviour Plug
 
   import Plug.Conn
 
-  @doc "Starts the stub; returns the base URL to use in place of https://api.openai.com/v1."
+  @doc "Starts the stub; returns the base URL to use in place of the provider's `/v1`."
   @spec start!(pid(), {pos_integer(), map()}) :: String.t()
   def start!(test, response) do
     plug = {__MODULE__, test: test, response: response}
@@ -17,7 +18,7 @@ defmodule HcpConformance.OpenAIStub do
     "http://127.0.0.1:#{port}/v1"
   end
 
-  @doc "A completed response whose output is `text`, after a reasoning item, as OpenAI sends it."
+  @doc "An OpenAI response whose output is `text`, after a reasoning item, as OpenAI sends it."
   @spec reply(String.t()) :: {200, map()}
   def reply(text) do
     {200,
@@ -36,6 +37,24 @@ defmodule HcpConformance.OpenAIStub do
      }}
   end
 
+  @doc "An Anthropic message whose text is `text`, after an empty thinking block, as Claude sends it."
+  @spec claude_reply(String.t()) :: {200, map()}
+  def claude_reply(text) do
+    {200,
+     %{
+       "id" => "msg_stub",
+       "type" => "message",
+       "role" => "assistant",
+       "model" => "claude-opus-5-5",
+       "stop_reason" => "end_turn",
+       "stop_details" => nil,
+       "content" => [
+         %{"type" => "thinking", "thinking" => "", "signature" => "sig"},
+         %{"type" => "text", "text" => text}
+       ]
+     }}
+  end
+
   @impl Plug
   def init(opts), do: opts
 
@@ -44,10 +63,11 @@ defmodule HcpConformance.OpenAIStub do
     {:ok, body, conn} = read_body(conn)
 
     send(opts[:test], {
-      :openai_request,
+      :assistant_request,
       %{
         path: conn.request_path,
         authorization: get_req_header(conn, "authorization"),
+        headers: Map.new(conn.req_headers),
         body: Jason.decode!(body)
       }
     })

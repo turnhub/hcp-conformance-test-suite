@@ -45,6 +45,8 @@ defmodule HcpConformance.Context do
   @doc """
   Sets up a run. Never raises: problems become setup notes and missing
   capabilities. `on_exchange` receives each HTTP exchange as it is recorded.
+  With the hook, a default agent grant is issued unless `default_grant: false`
+  (the chat page has the person issue every grant explicitly).
   """
   @spec start(Config.t(), keyword()) :: t()
   def start(%Config{} = config, opts \\ []) do
@@ -65,7 +67,7 @@ defmodule HcpConformance.Context do
     |> load_discovery()
     |> resolve_endpoints()
     |> choose_categories()
-    |> authenticate()
+    |> authenticate(Keyword.get(opts, :default_grant, true))
   end
 
   @doc "Releases the run: hard-deletes entries the suite created, or disposes of the hook subject."
@@ -143,7 +145,8 @@ defmodule HcpConformance.Context do
   @doc """
   Issues a grant through the hook, as the subject's own act. `opts`: `:scopes`
   (required), `:grant_type` ("temporary"), `:expires_in` (seconds, 3600),
-  `:restrictions`, `:client_name`. Skips when the run has no hook.
+  `:restrictions`, `:client_name`, `:client_id` (a fresh one per grant unless
+  given). Skips when the run has no hook.
   """
   @spec issue_grant!(t(), keyword()) :: map()
   def issue_grant!(ctx, opts) do
@@ -160,7 +163,7 @@ defmodule HcpConformance.Context do
   @spec issue_grant(t(), keyword()) :: {:ok, map()} | {:error, String.t()}
   def issue_grant(ctx, opts) do
     if not has?(ctx, :hook), do: Assert.skip!("needs the conformance hook to issue grants")
-    client_id = "hcp-conformance-" <> random_word(8)
+    client_id = Keyword.get_lazy(opts, :client_id, fn -> "hcp-conformance-" <> random_word(8) end)
     grant_type = Keyword.get(opts, :grant_type, "temporary")
 
     attrs =
@@ -291,15 +294,15 @@ defmodule HcpConformance.Context do
     }
   end
 
-  defp authenticate(ctx) do
+  defp authenticate(ctx, default_grant) do
     case Config.mode(ctx.config) do
-      :hook -> authenticate_hook(ctx)
+      :hook -> authenticate_hook(ctx, default_grant)
       :static -> authenticate_static(ctx)
       :anonymous -> ctx
     end
   end
 
-  defp authenticate_hook(ctx) do
+  defp authenticate_hook(ctx, default_grant) do
     config = ctx.config
 
     case Hook.create_subject(
@@ -319,18 +322,7 @@ defmodule HcpConformance.Context do
             capabilities: [:person, :hook | ctx.capabilities]
         }
 
-        try do
-          grant = issue_grant!(ctx, scopes: scopes(ctx.primary_category, ["read", "write"]))
-          agent = Map.put(grant, :scopes, scopes(ctx.primary_category, ["read", "write"]))
-          %{ctx | agent: agent, capabilities: [:agent | ctx.capabilities]}
-        rescue
-          error in [HcpConformance.Failure, HTTP.TransportError] ->
-            %{
-              ctx
-              | setup_notes:
-                  ctx.setup_notes ++ ["default agent grant: " <> Exception.message(error)]
-            }
-        end
+        if default_grant, do: default_agent(ctx), else: ctx
 
       {:error, message} ->
         %{ctx | setup_notes: ctx.setup_notes ++ ["conformance hook: " <> message]}
@@ -338,6 +330,18 @@ defmodule HcpConformance.Context do
   rescue
     error in HTTP.TransportError ->
       %{ctx | setup_notes: ctx.setup_notes ++ ["conformance hook: " <> error.message]}
+  end
+
+  defp default_agent(ctx) do
+    grant = issue_grant!(ctx, scopes: scopes(ctx.primary_category, ["read", "write"]))
+    agent = Map.put(grant, :scopes, scopes(ctx.primary_category, ["read", "write"]))
+    %{ctx | agent: agent, capabilities: [:agent | ctx.capabilities]}
+  rescue
+    error in [HcpConformance.Failure, HTTP.TransportError] ->
+      %{
+        ctx
+        | setup_notes: ctx.setup_notes ++ ["default agent grant: " <> Exception.message(error)]
+      }
   end
 
   defp authenticate_static(ctx) do

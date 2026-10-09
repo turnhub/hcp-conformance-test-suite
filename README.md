@@ -15,8 +15,9 @@ It runs three ways from one codebase:
 - **API**: `POST /api/runs` on a hosted instance answers with the report, for
   pipelines that should not install anything.
 
-It also has a **portable memory chat**: ChatGPT using memories that live in the
-target's HCP vault, read through an agent grant (see [Portable memory](#portable-memory)).
+It also has a **portable memory chat**: ChatGPT and Claude using memories that
+live in the target's HCP vault, only through grants the person issues, narrows
+and revokes on the page (see [Portable memory](#portable-memory)).
 
 It ships with a **reference HCP implementation** that passes every check. The
 suite's own tests run against it twice: once as written, and once with a
@@ -134,31 +135,48 @@ Exit status: `0` when no MUST check failed, `1` when one did, `2` for a usage er
 
 ## Portable memory
 
-The **Chat** page shows what HCP is for: memory that belongs to the person, not
-to the assistant. It is a chat with ChatGPT whose memories come from the target's
-HCP vault.
+The **Chat** page demonstrates what HCP is for: memory that belongs to the person,
+reached by assistants only through grants the person issues. Every mechanic is
+explicit on the page; nothing is granted implicitly.
 
-1. Connect to a target as for a run, with the conformance hook or an agent token.
-   **Use the reference implementation** works here too.
-2. Give an OpenAI API key, and a model if not the default (`gpt-5.4-mini`).
-3. The page connects to the vault as an agent: with the hook, a fresh subject and
-   a grant on one category; with an agent token, whatever that token's grant allows.
-4. Save memories to the vault, or bring a vault that already has some. Another
-   assistant may have written them.
-5. Chat. For each message the page searches the vault with the message as the
-   query and gives ChatGPT only the memories that came back, listed under the reply.
-   Untick **Use memories from the vault** to send the same message with none, for
-   comparison.
+1. Connect to a target as for a run, with the conformance hook (**Use the reference
+   implementation** works). The page connects as the person, in a fresh subject,
+   and issues **no grant**.
+2. Give an API key for ChatGPT (OpenAI), Claude (Anthropic), or both. Each is a
+   separate HCP client with grants of its own.
+3. **Grants.** Issue a grant to an assistant: which categories, read and/or write,
+   temporary (with an expiry) or persistent, and optionally narrowed to particular
+   memories (§4.1.5.1). The conformance hook stands in for the vault's consent
+   screen. Every grant is listed with its scopes, type, expiry and status, and can
+   be revoked.
+4. **Memories.** Save memories as the person, or as an assistant through its grant
+   (which needs write), with category, dimension, declaration type (user-declared,
+   model-inferred, issuer-attested) and confidence. An inference that contradicts
+   something the person declared on the same dimension is quarantined as
+   conflicted (§2.6) and is not recalled. **Export** downloads the vault as JSON.
+5. **Chat.** Each message is searched in the vault with the chosen assistant's own
+   grant, and only what the vault returns is passed on. The reply says exactly
+   what happened: the assistant holds no grant, the vault refused it (with the
+   status and problem type, for example 401 after a revocation or 403 for a
+   category outside the grant), or which memories were sent. **Search settings**
+   set the categories, the number of memories, full or minimal detail, and the
+   purpose recorded in the audit log. Untick the vault to send a message with
+   nothing from it.
+6. **HCP calls** lists every request the page made to the vault, with the response,
+   credentials redacted. The **Audit log** shows what the vault recorded, newest
+   first: grants issued and revoked, reads with their purpose, writes, conflicts.
 
-So the memory is portable: whatever wrote it, ChatGPT reads it through the
-person's own grant, and only the part a question needs leaves the vault.
+The page holds no state. API keys stay in the encrypted session cookie, the
+conversation and grant tokens live in the page, and requests ask OpenAI
+(`store: false`) and Anthropic not to keep anything. Claude requests opt into
+Anthropic's server-side fallbacks, so a declined request is retried on a fallback
+model rather than refused. The memories an assistant recalls do go to its vendor,
+so use synthetic data or a vault whose owner agrees. The hook subject is deleted
+when the page closes cleanly. `OPENAI_BASE_URL` and `ANTHROPIC_BASE_URL` point the
+page at compatible endpoints instead.
 
-The page holds no state either. The OpenAI key stays in the encrypted session
-cookie, the conversation lives in the page, and requests ask OpenAI not to store
-anything (`store: false`). The recalled memories do go to OpenAI, so point it at
-synthetic data or a vault whose owner agrees. With the hook, the subject is
-deleted when the page closes cleanly. `OPENAI_BASE_URL` points it at an
-OpenAI-compatible Responses API instead.
+Issuing grants needs the hook. With a person token instead, the page can still
+list and revoke grants, show the audit log and export.
 
 ## What a target needs
 
@@ -261,7 +279,8 @@ then applies per instance.
 | `MAX_CONCURRENT_RUNS` | `4` | Runs at once per instance. More are refused (429 on the API). |
 | `UI_BASIC_AUTH` | unset | `user:password` to put the runner and the API behind basic auth. `/health` and `/reference` stay open. |
 | `REFERENCE_SERVER` | `true` | Serve the reference implementation at `/reference`. |
-| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | The Responses API the chat page calls. |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | The Responses API the chat page calls for ChatGPT. |
+| `ANTHROPIC_BASE_URL` | `https://api.anthropic.com/v1` | The Messages API the chat page calls for Claude. |
 | `REFERENCE_HOOK_SECRET` | `reference-hook-secret` | The reference hook's secret. The connect page's demo button uses it: the reference holds only synthetic, in-memory data. |
 
 **Security notes for a public instance.**

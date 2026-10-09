@@ -14,12 +14,9 @@ defmodule HcpConformanceWeb.RunLive do
   use HcpConformanceWeb, :live_view
 
   alias HcpConformance.{Catalog, Config, Runs}
+  alias HcpConformanceWeb.Exchanges
 
   @statuses [:pass, :fail, :warn, :skip, :error, :na]
-
-  # Characters of each body shown in the live log; the JSON report keeps up to
-  # 16 KB of each.
-  @live_body_chars 8_000
 
   @impl true
   def mount(_params, %{"connection" => connection}, socket) when is_map(connection) do
@@ -165,7 +162,7 @@ defmodule HcpConformanceWeb.RunLive do
             <p :if={result.exchanges == [] and result.evidence != :run}>
               This check made no HTTP requests.
             </p>
-            <.exchange :for={exchange <- result.exchanges} row={dom_id} exchange={exchange} />
+            <Exchanges.exchange :for={exchange <- result.exchanges} row={dom_id} exchange={exchange} />
           </div>
         </details>
       </div>
@@ -185,42 +182,6 @@ defmodule HcpConformanceWeb.RunLive do
         }
       </script>
     </Layouts.app>
-    """
-  end
-
-  attr :row, :string,
-    required: true,
-    doc: "the result row's DOM id; an exchange can show in several rows"
-
-  attr :exchange, :map, required: true
-
-  defp exchange(assigns) do
-    ~H"""
-    <details id={"#{@row}-exchange-#{@exchange.id}"} class="collapse collapse-arrow bg-base-100">
-      <summary class="collapse-title">
-        <span class={["badge", exchange_class(@exchange)]}>{@exchange.status || "ERR"}</span>
-        <code>{@exchange.method} {@exchange.path}</code>
-        <span :if={@exchange.kind == :hook} class="badge badge-ghost">hook</span>
-        <span>{@exchange.duration_ms} ms</span>
-      </summary>
-      <div class="collapse-content">
-        <.list>
-          <:item title="URL"><code>{@exchange.url}</code></:item>
-          <:item title="Request headers">
-            <pre class="whitespace-pre-wrap">{@exchange.request_headers}</pre>
-          </:item>
-          <:item :if={@exchange.request_body} title="Request body">
-            <pre class="whitespace-pre-wrap">{@exchange.request_body}</pre>
-          </:item>
-          <:item title="Response headers">
-            <pre class="whitespace-pre-wrap">{@exchange.response_headers}</pre>
-          </:item>
-          <:item title={if @exchange.error, do: "Error", else: "Response body"}>
-            <pre class="whitespace-pre-wrap">{@exchange.error || @exchange.response_body}</pre>
-          </:item>
-        </.list>
-      </div>
-    </details>
     """
   end
 
@@ -279,8 +240,8 @@ defmodule HcpConformanceWeb.RunLive do
       Map.update(
         socket.assigns.pending,
         check_id,
-        [log_entry(exchange)],
-        &[log_entry(exchange) | &1]
+        [Exchanges.entry(exchange)],
+        &[Exchanges.entry(exchange) | &1]
       )
 
     {:noreply,
@@ -375,55 +336,6 @@ defmodule HcpConformanceWeb.RunLive do
 
   defp requests(1), do: "1 request"
   defp requests(count), do: "#{count} requests"
-
-  # An exchange as the log shows it: headers as lines, JSON bodies pretty-printed,
-  # long bodies cut (the downloaded report holds more).
-  defp log_entry(exchange) do
-    uri = URI.parse(exchange.url)
-
-    %{
-      id: exchange.id,
-      kind: exchange.kind,
-      check_id: exchange.check_id,
-      method: exchange.method,
-      url: exchange.url,
-      path: (uri.path || "/") <> if(uri.query, do: "?" <> uri.query, else: ""),
-      status: exchange.status,
-      duration_ms: exchange.duration_ms,
-      error: exchange.error,
-      request_headers: header_lines(exchange.request_headers),
-      request_body: display_body(exchange.request_body),
-      response_headers: header_lines(exchange.response_headers),
-      response_body: display_body(exchange.response_body)
-    }
-  end
-
-  defp header_lines([]), do: "(none)"
-
-  defp header_lines(headers),
-    do: Enum.map_join(headers, "\n", fn [name, value] -> "#{name}: #{value}" end)
-
-  defp display_body(nil), do: nil
-  defp display_body(""), do: nil
-
-  defp display_body(body) do
-    pretty =
-      case Jason.decode(body) do
-        {:ok, _json} -> Jason.Formatter.pretty_print(body)
-        {:error, _reason} -> body
-      end
-
-    if String.length(pretty) > @live_body_chars do
-      String.slice(pretty, 0, @live_body_chars) <>
-        "\n…[cut in the live log; the JSON report holds more]"
-    else
-      pretty
-    end
-  end
-
-  defp exchange_class(%{status: status}) when status in 200..299, do: "badge-success"
-  defp exchange_class(%{status: status}) when status in 300..499, do: "badge-info"
-  defp exchange_class(_exchange), do: "badge-error"
 
   defp summary(counts) do
     Enum.map_join(@statuses, ", ", fn status ->
