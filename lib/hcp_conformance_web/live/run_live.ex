@@ -1,8 +1,10 @@
 defmodule HcpConformanceWeb.RunLive do
   @moduledoc """
   Runs the suite against the target in the session and streams results as they
-  arrive, and every HTTP exchange the suite makes as it makes it (the HTTP log
-  tab): method, URL, headers and bodies both ways, with credentials redacted.
+  arrive. Each result folds in the HTTP exchanges its check made: method, URL,
+  headers and bodies both ways, with credentials redacted. Setup and teardown
+  traffic gets rows of its own, in the order it happened, and a result that did
+  not pass opens on its exchanges.
 
   The run is a LiveView async task, linked to this page: closing the tab stops
   it. Its report lives in this process only, offered as a JSON download, and is
@@ -33,11 +35,8 @@ defmodule HcpConformanceWeb.RunLive do
            form: to_form(%{"groups" => Map.new(Catalog.groups(), &{&1, "true"})}, as: :run)
          )
          |> reset_run()
-         |> assign(tab: "results")
          |> stream_configure(:results, dom_id: &("result-" <> String.replace(&1.id, ".", "-")))
-         |> stream_configure(:exchanges, dom_id: &"exchange-#{&1.id}")
-         |> stream(:results, [])
-         |> stream(:exchanges, [])}
+         |> stream(:results, [])}
 
       {:error, message} ->
         {:ok, socket |> put_flash(:error, message) |> redirect(to: ~p"/")}
@@ -56,8 +55,13 @@ defmodule HcpConformanceWeb.RunLive do
       counts: Map.new(@statuses, &{&1, 0}),
       setup_notes: [],
       report: nil,
-      findings: [],
-      exchange_count: 0
+      # Exchanges of the check (or setup, or teardown) still running, by check
+      # id, newest first; they join its row when it finishes.
+      pending: %{},
+      # Setup's exchanges by id, kept for the results that cite them (the
+      # discovery checks judge the document setup fetched).
+      setup: %{},
+      current: nil
     )
   end
 
@@ -93,6 +97,9 @@ defmodule HcpConformanceWeb.RunLive do
       <div :if={@running} id="progress-card" class="card bg-base-200">
         <div class="card-body">
           <p>Ran {@done} of {@total} checks.</p>
+          <p :if={@current} id="current">
+            Now: <code>{@current.check_id}</code>, {requests(@current.requests)} so far.
+          </p>
           <progress id="progress" class="progress progress-primary" value={@done} max={max(@total, 1)}></progress>
         </div>
       </div>
@@ -128,110 +135,40 @@ defmodule HcpConformanceWeb.RunLive do
         <span>{note}</span>
       </div>
 
-      <div role="tablist" id="run-tabs" class="tabs tabs-box">
-        <button
-          role="tab"
-          id="tab-results"
-          class={["tab", @tab == "results" && "tab-active"]}
-          phx-click="tab"
-          phx-value-tab="results"
+      <div id="results" phx-update="stream" class="space-y-2">
+        <details
+          :for={{dom_id, result} <- @streams.results}
+          id={dom_id}
+          open={result.status in [:fail, :warn, :error]}
+          class="collapse collapse-arrow bg-base-200"
         >
-          Results
-        </button>
-        <button
-          role="tab"
-          id="tab-log"
-          class={["tab", @tab == "log" && "tab-active"]}
-          phx-click="tab"
-          phx-value-tab="log"
-        >
-          HTTP log ({@exchange_count})
-        </button>
-      </div>
-
-      <section id="log-panel" class={[@tab != "log" && "hidden"]}>
-        <p>
-          Every request the suite makes, as it makes it. Credentials are redacted: bearer
-          tokens, the hook secret, tokens the hook hands out, and cookies.
-        </p>
-        <div id="exchanges" phx-update="stream">
-          <details
-            :for={{dom_id, exchange} <- @streams.exchanges}
-            id={dom_id}
-            class="collapse collapse-arrow bg-base-200"
-          >
-            <summary class="collapse-title">
-              <span class={["badge", exchange_class(exchange)]}>{exchange.status || "ERR"}</span>
-              <code>{exchange.method} {exchange.path}</code>
-              <span :if={exchange.kind == :hook} class="badge badge-ghost">hook</span>
-              <span class="badge badge-ghost">{exchange.check_id}</span>
-              <span>{exchange.duration_ms} ms</span>
-            </summary>
-            <div class="collapse-content">
-              <.list>
-                <:item title="URL"><code>{exchange.url}</code></:item>
-                <:item title="Request headers">
-                  <pre class="whitespace-pre-wrap">{exchange.request_headers}</pre>
-                </:item>
-                <:item :if={exchange.request_body} title="Request body">
-                  <pre class="whitespace-pre-wrap">{exchange.request_body}</pre>
-                </:item>
-                <:item title="Response headers">
-                  <pre class="whitespace-pre-wrap">{exchange.response_headers}</pre>
-                </:item>
-                <:item title={if exchange.error, do: "Error", else: "Response body"}>
-                  <pre class="whitespace-pre-wrap">{exchange.error || exchange.response_body}</pre>
-                </:item>
-              </.list>
-            </div>
-          </details>
-        </div>
-      </section>
-
-      <section id="results-panel" class={[@tab != "results" && "hidden"]}>
-        <div class="overflow-x-auto">
-          <.table id="results" rows={@streams.results}>
-            <:col :let={{_id, result}} label="Result">
-              <span class={["badge", status_class(result.status)]}>{status_label(result.status)}</span>
-            </:col>
-            <:col :let={{_id, result}} label="Check">
-              <code>{result.id}</code>
-              <p>{result.title}</p>
-              <p :if={result.message}>{result.message}</p>
-            </:col>
-            <:col :let={{_id, result}} label="Section">§{result.section}</:col>
-            <:col :let={{_id, result}} label="Level">
+          <summary class="collapse-title">
+            <span :if={result.status} class={["badge", status_class(result.status)]}>
+              {status_label(result.status)}
+            </span>
+            <span :if={!result.status} class="badge badge-ghost">{String.upcase(result.id)}</span>
+            <code :if={result.status}>{result.id}</code>
+            <span :if={result.section} class="badge badge-ghost">§{result.section}</span>
+            <span :if={result.level} class="badge badge-ghost">
               {result.level |> to_string() |> String.upcase()}
-            </:col>
-          </.table>
-        </div>
-
-        <section :if={@findings != []} id="findings">
-          <.header>
-            Findings
-            <:subtitle>The HTTP exchanges behind each failure, warning and error.</:subtitle>
-          </.header>
-          <div
-            :for={finding <- @findings}
-            id={"finding-" <> String.replace(finding.id, ".", "-")}
-            class="collapse collapse-arrow bg-base-200"
-          >
-            <input type="checkbox" />
-            <div class="collapse-title">
-              <code>{finding.id}</code> {finding.message}
-            </div>
-            <div class="collapse-content">
-              <div :for={exchange <- finding.exchanges}>
-                <p>
-                  <code>{exchange.method} {exchange.url} → {exchange.status || "no response"}</code>
-                </p>
-                <pre :if={exchange.request_body} class="whitespace-pre-wrap">{exchange.request_body}</pre>
-                <pre class="whitespace-pre-wrap">{exchange.response_body || exchange.error}</pre>
-              </div>
-            </div>
+            </span>
+            <span data-role="request-count" class="badge badge-ghost">
+              {requests(length(result.exchanges))}
+            </span>
+            <p>{result.title}</p>
+            <p :if={result.message}>{result.message}</p>
+          </summary>
+          <div class="collapse-content space-y-2">
+            <p :if={result.evidence == :run}>
+              This check judges every response in the run: the requests are in the other rows.
+            </p>
+            <p :if={result.exchanges == [] and result.evidence != :run}>
+              This check made no HTTP requests.
+            </p>
+            <.exchange :for={exchange <- result.exchanges} row={dom_id} exchange={exchange} />
           </div>
-        </section>
-      </section>
+        </details>
+      </div>
 
       <script :type={Phoenix.LiveView.ColocatedHook} name=".Download">
         export default {
@@ -251,6 +188,42 @@ defmodule HcpConformanceWeb.RunLive do
     """
   end
 
+  attr :row, :string,
+    required: true,
+    doc: "the result row's DOM id; an exchange can show in several rows"
+
+  attr :exchange, :map, required: true
+
+  defp exchange(assigns) do
+    ~H"""
+    <details id={"#{@row}-exchange-#{@exchange.id}"} class="collapse collapse-arrow bg-base-100">
+      <summary class="collapse-title">
+        <span class={["badge", exchange_class(@exchange)]}>{@exchange.status || "ERR"}</span>
+        <code>{@exchange.method} {@exchange.path}</code>
+        <span :if={@exchange.kind == :hook} class="badge badge-ghost">hook</span>
+        <span>{@exchange.duration_ms} ms</span>
+      </summary>
+      <div class="collapse-content">
+        <.list>
+          <:item title="URL"><code>{@exchange.url}</code></:item>
+          <:item title="Request headers">
+            <pre class="whitespace-pre-wrap">{@exchange.request_headers}</pre>
+          </:item>
+          <:item :if={@exchange.request_body} title="Request body">
+            <pre class="whitespace-pre-wrap">{@exchange.request_body}</pre>
+          </:item>
+          <:item title="Response headers">
+            <pre class="whitespace-pre-wrap">{@exchange.response_headers}</pre>
+          </:item>
+          <:item title={if @exchange.error, do: "Error", else: "Response body"}>
+            <pre class="whitespace-pre-wrap">{@exchange.error || @exchange.response_body}</pre>
+          </:item>
+        </.list>
+      </div>
+    </details>
+    """
+  end
+
   @impl true
   def handle_event("run", _params, %{assigns: %{running: true}} = socket), do: {:noreply, socket}
 
@@ -267,7 +240,6 @@ defmodule HcpConformanceWeb.RunLive do
          |> reset_run()
          |> assign(running: true, form: to_form(params["run"] || %{}, as: :run))
          |> stream(:results, [], reset: true)
-         |> stream(:exchanges, [], reset: true)
          |> start_async(:run, fn -> Runs.run(config, on_event: on_event) end)}
 
       {:error, message} ->
@@ -284,10 +256,6 @@ defmodule HcpConformanceWeb.RunLive do
 
   def handle_event("download", _params, socket), do: {:noreply, socket}
 
-  def handle_event("tab", %{"tab" => tab}, socket) when tab in ["results", "log"] do
-    {:noreply, assign(socket, tab: tab)}
-  end
-
   # Every group ticked is no selection at all, so the verdict can be a claim.
   defp selected_groups(%{} = groups) do
     selected = for {group, "true"} <- groups, do: group
@@ -298,35 +266,57 @@ defmodule HcpConformanceWeb.RunLive do
 
   @impl true
   def handle_info({:run_event, {:started, info}}, socket) do
-    {:noreply, assign(socket, total: info.total, setup_notes: info.setup_notes)}
+    {:noreply,
+     socket
+     |> assign(total: info.total, setup_notes: info.setup_notes)
+     |> insert_phases()}
   end
 
   def handle_info({:run_event, {:exchange, exchange}}, socket) do
+    check_id = exchange.check_id || "setup"
+
+    pending =
+      Map.update(
+        socket.assigns.pending,
+        check_id,
+        [log_entry(exchange)],
+        &[log_entry(exchange) | &1]
+      )
+
     {:noreply,
-     socket
-     |> update(:exchange_count, &(&1 + 1))
-     |> stream_insert(:exchanges, log_entry(exchange))}
+     assign(socket,
+       pending: pending,
+       current: %{check_id: check_id, requests: length(pending[check_id])}
+     )}
   end
 
   def handle_info({:run_event, {:result, result}}, socket) do
+    {own, pending} = Map.pop(socket.assigns.pending, result.id, [])
+    own = Enum.reverse(own)
+    own_ids = MapSet.new(own, & &1.id)
+
+    cited =
+      for id <- result.exchanges,
+          not MapSet.member?(own_ids, id),
+          entry = socket.assigns.setup[id],
+          do: entry
+
     {:noreply,
      socket
+     |> insert_phases()
+     |> assign(pending: pending, current: nil)
      |> update(:done, &(&1 + 1))
      |> update(:counts, &Map.update!(&1, result.status, fn count -> count + 1 end))
-     |> stream_insert(:results, result)}
+     |> stream_insert(:results, %{result | exchanges: cited ++ own})}
   end
 
-  def handle_info({:run_event, {:finished, _report}}, socket), do: {:noreply, socket}
+  def handle_info({:run_event, {:finished, _report}}, socket),
+    do: {:noreply, insert_phases(socket)}
 
   @impl true
   def handle_async(:run, {:ok, {:ok, report}}, socket) do
     {:noreply,
-     assign(socket,
-       running: false,
-       report: report,
-       setup_notes: report.setup_notes,
-       findings: findings(report)
-     )}
+     assign(socket, running: false, current: nil, report: report, setup_notes: report.setup_notes)}
   end
 
   def handle_async(:run, {:ok, {:error, :busy}}, socket) do
@@ -341,19 +331,50 @@ defmodule HcpConformanceWeb.RunLive do
      socket |> assign(running: false) |> put_flash(:error, "The run stopped: #{inspect(reason)}")}
   end
 
-  # Non-passing results with the exchanges behind them, resolved from the
-  # transcript once the run is over.
-  defp findings(report) do
-    exchanges = Map.new(report.transcript, &{&1.id, &1})
+  @phases %{
+    "setup" => "Discovery, and the subject and grants the run works with",
+    "teardown" => "Disposing of the subject, or deleting the entries the run created"
+  }
 
-    for result <- report.results, result.status in [:fail, :warn, :error] do
-      %{
-        id: result.id,
-        message: result.message,
-        exchanges: Enum.map(result.exchanges, &exchanges[&1]) |> Enum.reject(&is_nil/1)
-      }
+  # Setup and teardown traffic finished before the next check reports, so their
+  # rows go in then, keeping the list in the order things happened.
+  defp insert_phases(socket), do: Enum.reduce(["setup", "teardown"], socket, &insert_phase/2)
+
+  defp insert_phase(phase, socket) do
+    case Map.pop(socket.assigns.pending, phase) do
+      {nil, _pending} ->
+        socket
+
+      {exchanges, pending} ->
+        exchanges = Enum.reverse(exchanges)
+
+        socket
+        |> assign(pending: pending)
+        |> remember_setup(phase, exchanges)
+        |> stream_insert(:results, phase_row(phase, exchanges))
     end
   end
+
+  defp remember_setup(socket, "setup", exchanges),
+    do: assign(socket, setup: Map.new(exchanges, &{&1.id, &1}))
+
+  defp remember_setup(socket, _phase, _exchanges), do: socket
+
+  defp phase_row(phase, exchanges) do
+    %{
+      id: phase,
+      title: @phases[phase],
+      status: nil,
+      message: nil,
+      section: nil,
+      level: nil,
+      evidence: :own,
+      exchanges: exchanges
+    }
+  end
+
+  defp requests(1), do: "1 request"
+  defp requests(count), do: "#{count} requests"
 
   # An exchange as the log shows it: headers as lines, JSON bodies pretty-printed,
   # long bodies cut (the downloaded report holds more).

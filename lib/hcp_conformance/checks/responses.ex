@@ -20,7 +20,7 @@ defmodule HcpConformance.Checks.Responses do
   def group, do: "responses"
 
   def checks do
-    post = [requires: [:rest], phase: :post]
+    post = [requires: [:rest], phase: :post, evidence: :run]
 
     [
       Check.new(

@@ -17,10 +17,25 @@ defmodule HcpConformance.Check do
 
   `phase: :post` checks run after every other check and inspect the transcript of
   the whole run instead of making requests of their own.
+
+  `evidence` says which HTTP exchanges a result cites, so a reader can see what
+  was judged: `:own`, the requests the check made; `:discovery`, the discovery
+  document fetched during setup; `:run`, every response in the run, too many to
+  cite.
   """
 
   @enforce_keys [:id, :section, :level, :title, :run]
-  defstruct [:id, :section, :level, :title, :run, :group, requires: [], phase: :main]
+  defstruct [
+    :id,
+    :section,
+    :level,
+    :title,
+    :run,
+    :group,
+    requires: [],
+    phase: :main,
+    evidence: :own
+  ]
 
   @type level :: :must | :should
   @type t :: %__MODULE__{
@@ -31,10 +46,13 @@ defmodule HcpConformance.Check do
           run: (HcpConformance.Context.t() -> term()),
           group: String.t() | nil,
           requires: [atom()],
-          phase: :main | :post
+          phase: :main | :post,
+          evidence: evidence()
         }
 
-  @doc "Builds a check. `opts` take `requires` and `phase`."
+  @type evidence :: :own | :discovery | :run
+
+  @doc "Builds a check. `opts` take `requires`, `phase` and `evidence`."
   @spec new(
           String.t(),
           String.t(),
@@ -52,7 +70,8 @@ defmodule HcpConformance.Check do
       title: title,
       run: run,
       requires: Keyword.get(opts, :requires, []),
-      phase: Keyword.get(opts, :phase, :main)
+      phase: Keyword.get(opts, :phase, :main),
+      evidence: Keyword.get(opts, :evidence, :own)
     }
   end
 end

@@ -55,32 +55,56 @@ defmodule HcpConformanceWeb.RunLiveTest do
     assert %{"verdict" => "pass", "partial" => true} = Jason.decode!(content)
   end
 
-  test "the HTTP log streams every exchange, headers and bodies both ways, redacted", %{
+  test "each result folds in the HTTP exchanges its check made, headers and bodies, redacted", %{
     conn: conn
   } do
     {:ok, view, _html} = live(connected(conn), ~p"/run")
 
-    view |> form("#run-form", run: %{groups: only(["discovery", "entries"])}) |> render_submit()
+    view
+    |> form("#run-form", run: %{groups: only(["discovery", "entries", "responses"])})
+    |> render_submit()
+
     render_async(view, 60_000)
 
-    view |> element("#tab-log") |> render_click()
-    refute has_element?(view, "#log-panel.hidden")
-    assert has_element?(view, "#results-panel.hidden")
+    served = view |> element("#result-discovery-served") |> render()
+    assert served =~ "GET /reference/.well-known/hcp-configuration"
+    assert served =~ "&quot;hcp_version&quot;: &quot;1.0&quot;"
+    assert has_element?(view, "#result-discovery-served [data-role=request-count]", "1 request")
 
-    html = view |> element("#exchanges") |> render()
-    document = LazyHTML.from_fragment(html)
-    assert Enum.count(LazyHTML.query(document, "details")) > 10
+    assert has_element?(view, "#result-responses-hcp_version", "every response in the run")
 
-    assert html =~ "authorization: Bearer [redacted]"
-    assert html =~ "content-type: application/ld+json"
-    assert html =~ "POST /reference/v1/preferences"
-    assert html =~ "&quot;hcp_version&quot;: &quot;1.0&quot;"
+    added = view |> element("#result-entries-add") |> render()
+    assert added =~ "POST /reference/v1/preferences"
+    assert added =~ "authorization: Bearer [redacted]"
+    assert added =~ "content-type: application/ld+json"
+    refute added =~ "GET /reference/.well-known/hcp-configuration"
+
+    html = render(view)
     refute html =~ "ref-person-"
     refute html =~ "ref-grant-"
     refute html =~ "reference-hook-secret"
   end
 
-  test "a failing target lists its findings with the HTTP exchanges", %{conn: conn} do
+  test "setup and teardown traffic gets rows of its own, in the order it happened", %{conn: conn} do
+    {:ok, view, _html} = live(connected(conn), ~p"/run")
+
+    view |> form("#run-form", run: %{groups: only(["discovery"])}) |> render_submit()
+    render_async(view, 60_000)
+
+    ids =
+      view
+      |> element("#results")
+      |> render()
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query("#results > details")
+      |> LazyHTML.attribute("id")
+
+    assert hd(ids) == "result-setup"
+    assert "result-teardown" in ids
+    assert has_element?(view, "#result-setup", "POST /reference/conformance-hook/subjects")
+  end
+
+  test "a failing result opens on the exchanges behind it", %{conn: conn} do
     target = HcpConformance.ReferenceTarget.start!(faults: [:not_found_for_agent])
 
     conn =
@@ -97,7 +121,8 @@ defmodule HcpConformanceWeb.RunLiveTest do
     render_async(view, 60_000)
 
     assert has_element?(view, "#verdict[data-verdict=fail]")
-    assert has_element?(view, "#finding-entries-nonexistent_is_403", "404")
+    assert has_element?(view, "#result-entries-nonexistent_is_403[open]", "404")
+    refute has_element?(view, "#result-entries-add[open]")
     refute render(view) =~ target.hook_secret
   end
 end

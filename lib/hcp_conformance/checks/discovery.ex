@@ -20,7 +20,12 @@ defmodule HcpConformance.Checks.Discovery do
 
   def group, do: "discovery"
 
+  # Every discovery check judges the document fetched during setup.
   def checks do
+    Enum.map(declared(), &%{&1 | evidence: :discovery})
+  end
+
+  defp declared do
     [
       Check.new(
         "discovery.served",

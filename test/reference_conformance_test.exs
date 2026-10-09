@@ -19,6 +19,25 @@ defmodule HcpConformance.ReferenceConformanceTest do
     assert [%{id: "mcp.manifest"}] = Enum.filter(report.results, &(&1.status == :na))
   end
 
+  test "every result cites the exchanges it judged", %{target: target} do
+    {:ok, report} = HcpConformance.run(ReferenceTarget.hook_config(target))
+    exchanges = Map.new(report.transcript, &{&1.id, &1})
+    results = Map.new(report.results, &{&1.id, &1})
+
+    # A discovery check judges the document fetched during setup.
+    assert [%{method: "GET", url: url, check_id: "setup"}] =
+             Enum.map(results["discovery.served"].exchanges, &exchanges[&1])
+
+    assert String.ends_with?(url, "/.well-known/hcp-configuration")
+
+    # Other checks cite the requests they made themselves.
+    assert Enum.all?(results["entries.add"].exchanges, &(exchanges[&1].check_id == "entries.add"))
+
+    # A check over every response says so rather than citing them all.
+    assert %{evidence: :run, exchanges: []} = results["responses.hcp_version"]
+    assert %{evidence: :own} = results["entries.add"]
+  end
+
   test "static mode: no failures, and checks needing the hook are skipped", %{target: target} do
     token = ReferenceTarget.person_token!(target)
 

@@ -73,6 +73,7 @@ defmodule HcpConformance.Runner do
       level: check.level,
       title: check.title,
       group: check.group,
+      evidence: check.evidence,
       exchanges: []
     }
 
@@ -81,7 +82,7 @@ defmodule HcpConformance.Runner do
         started = System.monotonic_time(:millisecond)
         {status, message} = execute(ctx, check)
 
-        exchanges =
+        own =
           ctx.transcript
           |> Transcript.exchanges()
           |> Enum.filter(&(&1.check_id == check.id))
@@ -91,7 +92,7 @@ defmodule HcpConformance.Runner do
           status: status,
           message: message && Transcript.redact(ctx.transcript, message),
           duration_ms: System.monotonic_time(:millisecond) - started,
-          exchanges: exchanges
+          exchanges: cited(ctx, check.evidence) ++ own
         })
 
       missing ->
@@ -101,6 +102,13 @@ defmodule HcpConformance.Runner do
         Map.merge(base, %{status: status, message: "needs " <> describe(missing), duration_ms: 0})
     end
   end
+
+  # Exchanges a result cites besides its own requests.
+  @spec cited(Context.t(), Check.evidence()) :: [pos_integer()]
+  defp cited(%Context{discovery_response: %{exchange_id: id}}, :discovery) when is_integer(id),
+    do: [id]
+
+  defp cited(_ctx, _evidence), do: []
 
   defp execute(ctx, check) do
     task =
