@@ -1,5 +1,8 @@
 # Hosting the runner on Cloudflare
 
+> **Paused.** Not deployed, and not built in CI for now. The setup below worked end to end
+> under `wrangler dev`; pick it up from here when Cloudflare hosting is back on.
+
 The runner is a Phoenix release, so it runs as a [Cloudflare Container](https://developers.cloudflare.com/containers/)
 behind a small Worker. This is the same shape as `turnhub/self-triage-dataset`'s `site/`: a
 `wrangler.jsonc`, `npm run deploy`, and Workers Builds for deploy on push. The difference is
