@@ -284,6 +284,14 @@ docker run -p 4000:4000 \
   hcp-conformance
 ```
 
+**Kubernetes**: publishing a GitHub release runs `.github/workflows/release.yml`,
+which pushes the image to
+`europe-west3-docker.pkg.dev/turn-tooling/turnhub/hcp-conformance:<release tag>`.
+Give the container port 4000, point the liveness and readiness probes at
+`GET /health` (exempt from the HTTPS redirect), take `SECRET_KEY_BASE` from a
+Secret, and set `PHX_HOST` to the ingress host. Set `BIND_ADDRESS=0.0.0.0` if the
+pods have no IPv6.
+
 **Cloudflare** (paused for now; a Container behind a Worker, on workers.dev): see
 [`cloudflare/README.md`](cloudflare/README.md). It deploys with `npm run deploy` or on every push
 to `main` through Workers Builds, and needs the Workers Paid plan.
