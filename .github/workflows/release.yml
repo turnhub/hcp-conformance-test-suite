@@ -2,8 +2,10 @@ name: Release image
 
 # Publishing a GitHub release (or turning a pre-release into a release) builds
 # the release image and pushes it to Turn's Artifact Registry, tagged with the
-# release tag, for the Kubernetes deployment to pull. Same setup as
-# turnhub/forwarder.
+# release tag, for the Kubernetes deployment to pull. It authenticates keylessly
+# through Workload Identity Federation as the gh-build service account, which
+# turnhub/turnio-deploys (makefile_helpers/bootstrap-hyperscaler.sh, tooling
+# mode) trusts from this repository.
 on:
   release:
     types: [released]
@@ -25,8 +27,8 @@ jobs:
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
         id: auth-gcp
         with:
-          workload_identity_provider: "projects/669832244717/locations/global/workloadIdentityPools/github-identity-pool/providers/github-identity-pool-provider"
-          service_account: "github-actions-secrets@turn-tooling.iam.gserviceaccount.com"
+          workload_identity_provider: "projects/669832244717/locations/global/workloadIdentityPools/gh-actions-cd-pool/providers/github-actions"
+          service_account: "gh-build@turn-tooling.iam.gserviceaccount.com"
           token_format: "access_token"
           access_token_lifetime: "1800s"
       - name: Authenticate Docker to Artifact Registry
