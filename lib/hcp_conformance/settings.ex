@@ -24,6 +24,19 @@ defmodule HcpConformance.Settings do
   @spec reference_server?() :: boolean()
   def reference_server?, do: get(:reference_server, true) == true
 
+  @doc """
+  Where this instance reaches its own reference implementation, on loopback;
+  nil when it serves none. The private-network guard lets runs reach this one
+  loopback address.
+  """
+  @spec local_reference_url() :: String.t() | nil
+  def local_reference_url do
+    with true <- reference_server?(),
+         url when is_binary(url) <- get(:local_reference_url, nil),
+         do: url,
+         else: (_none -> nil)
+  end
+
   @spec reference_hook_secret() :: String.t()
   def reference_hook_secret, do: get(:reference_hook_secret, "reference-hook-secret")
 

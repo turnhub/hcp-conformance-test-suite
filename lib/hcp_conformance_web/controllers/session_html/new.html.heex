@@ -18,6 +18,10 @@
     <div class="card-body">
       <h2 class="card-title">Try it first</h2>
       <p>This instance hosts a reference HCP implementation with the conformance hook.</p>
+      <p>
+        Runs reach it inside this instance, at <code class="break-all">{@reference.target}</code>, so
+        nothing in front of its public address, such as a proxy or a login, gets in the way.
+      </p>
       <.form for={%{}} as={:connection} action={~p"/session"} id="reference-form">
         <.input type="hidden" name="connection[target]" value={@reference.target} />
         <.input type="hidden" name="connection[hook_url]" value={@reference.hook_url} />

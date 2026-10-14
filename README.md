@@ -81,7 +81,10 @@ out (registered as secrets before their response is shown) and cookies in either
 direction. Requests go straight from the run to your page. They are not written
 to the server's logs, so other people's payloads never land in the operator's
 log files. **Use the reference implementation**
-shows a passing run without any setup.
+shows a passing run without any setup. The run reaches the reference inside the
+instance, on loopback at `http://127.0.0.1:$PORT/reference`, not through the
+public URL, so a proxy or login in front of the instance (Cloudflare Access, for
+one) cannot turn its requests away.
 
 The app is stateless. The connection, credentials included, is kept in your
 session cookie, which is encrypted as well as signed. A run lives in the page
@@ -320,7 +323,7 @@ then applies per instance.
 | `ALLOW_PRIVATE_TARGETS` | `false` in the image, `true` locally | Allow targets on loopback and private networks. Leave off on a public instance. |
 | `MAX_CONCURRENT_RUNS` | `4` | Runs at once per instance. More are refused (429 on the API). |
 | `UI_BASIC_AUTH` | unset | `user:password` to put the runner and the API behind basic auth. `/health` and `/reference` stay open. |
-| `REFERENCE_SERVER` | `true` | Serve the reference implementation at `/reference`. |
+| `REFERENCE_SERVER` | `true` | Serve the reference implementation at `/reference`. The demo button reaches it on `127.0.0.1:$PORT`, so `BIND_ADDRESS` must include loopback (the default and `0.0.0.0` both do). |
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | The Responses API the chat page calls for ChatGPT. |
 | `ANTHROPIC_BASE_URL` | `https://api.anthropic.com/v1` | The Messages API the chat page calls for Claude. |
 | `REFERENCE_HOOK_SECRET` | `reference-hook-secret` | The reference hook's secret. The connect page's demo button uses it: the reference holds only synthetic, in-memory data. |
@@ -329,8 +332,11 @@ then applies per instance.
 
 - The runner fetches whatever URL a visitor submits. It refuses hosts that
   resolve to private, loopback or link-local addresses unless
-  `ALLOW_PRIVATE_TARGETS` is set. The resolved address is not pinned for the
-  connection, so also deploy it without access to internal networks.
+  `ALLOW_PRIVATE_TARGETS` is set. The one exception is the instance's own
+  reference implementation on loopback (`http://127.0.0.1:$PORT/reference` and
+  paths under it), which holds only synthetic data. The resolved address is not
+  pinned for the connection, so also deploy it without access to internal
+  networks.
 - Hook secrets and tokens are never stored on the server. They live in the
   visitor's encrypted session cookie, and transcripts and reports redact them.
 - Visitors hand the instance credentials for their own systems. Run a public

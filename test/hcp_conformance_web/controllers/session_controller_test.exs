@@ -11,6 +11,25 @@ defmodule HcpConformanceWeb.SessionControllerTest do
     refute Enum.empty?(LazyHTML.query(document, "#reference-form"))
   end
 
+  test "the reference implementation is reached on loopback, past any proxy in front", %{
+    conn: conn
+  } do
+    port = HcpConformanceWeb.Endpoint.config(:http)[:port]
+    local = "http://127.0.0.1:#{port}/reference"
+
+    document = conn |> get(~p"/") |> html_response(200) |> LazyHTML.from_document()
+
+    assert ["#{local}"] ==
+             document
+             |> LazyHTML.query("#reference-form input[name='connection[target]']")
+             |> LazyHTML.attribute("value")
+
+    assert [local <> "/conformance-hook"] ==
+             document
+             |> LazyHTML.query("#reference-form input[name='connection[hook_url]']")
+             |> LazyHTML.attribute("value")
+  end
+
   test "connecting keeps the credentials in an encrypted session and goes to the run", %{
     conn: conn
   } do
