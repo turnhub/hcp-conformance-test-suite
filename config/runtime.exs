@@ -20,8 +20,14 @@ if System.get_env("PHX_SERVER") do
   config :hcp_conformance, HcpConformanceWeb.Endpoint, server: true
 end
 
-config :hcp_conformance, HcpConformanceWeb.Endpoint,
-  http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+port = String.to_integer(System.get_env("PORT", "4000"))
+
+config :hcp_conformance, HcpConformanceWeb.Endpoint, http: [port: port]
+
+# The reference implementation as this instance reaches it: on loopback, on its
+# own port, so a proxy or a login in front of the public URL (Cloudflare Access,
+# say) never stands between a run and the reference.
+config :hcp_conformance, local_reference_url: "http://127.0.0.1:#{port}/reference"
 
 # Runner settings from the environment, where set (see config/config.exs).
 if config_env() != :test do

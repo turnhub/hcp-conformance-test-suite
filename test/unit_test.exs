@@ -168,6 +168,32 @@ defmodule HcpConformance.UnitTest do
       assert Enum.filter(public, &TargetGuard.private?/1) == []
     end
 
+    test "reaches this instance's own reference implementation on loopback, with private targets refused" do
+      own = "http://127.0.0.1:4000/reference"
+
+      assert TargetGuard.check(own, false, own) == :ok
+      assert TargetGuard.check(own <> "/.well-known/hcp-configuration", false, own) == :ok
+      assert TargetGuard.check(own <> "/conformance-hook/subjects", false, own) == :ok
+    end
+
+    test "opens nothing else on loopback for the reference implementation" do
+      own = "http://127.0.0.1:4000/reference"
+
+      for url <- [
+            "http://127.0.0.1:4000/run",
+            "http://127.0.0.1:4000/referenced",
+            "http://127.0.0.1:4000/reference/../run",
+            "http://127.0.0.1:4001/reference",
+            "https://127.0.0.1:4000/reference",
+            "http://localhost:4000/reference",
+            "http://10.0.0.1:4000/reference"
+          ] do
+        assert {:error, _message} = TargetGuard.check(url, false, own), url
+      end
+
+      assert {:error, _message} = TargetGuard.check(own, false, nil)
+    end
+
     test "refuses private targets unless allowed" do
       assert {:error, message} = TargetGuard.check("http://127.0.0.1:4000/v1", false)
       assert message =~ "non-public"

@@ -65,7 +65,7 @@ defmodule HcpConformanceWeb.SessionController do
 
   defp reference do
     if Settings.reference_server?() do
-      base = ReferenceMount.base_url()
+      base = ReferenceMount.local_url()
 
       %{
         target: base,

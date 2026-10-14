@@ -13,6 +13,8 @@ defmodule HcpConformance.TargetGuard do
 
   import Bitwise
 
+  alias HcpConformance.Settings
+
   # The IPv4 blocks outside the public internet, as {network, prefix length}:
   # "this" network, private (RFC 1918), shared CGNAT space, loopback, link-local,
   # benchmarking, and multicast plus reserved.
@@ -28,10 +30,40 @@ defmodule HcpConformance.TargetGuard do
     {{224, 0, 0, 0}, 3}
   ]
 
-  @spec check(String.t(), boolean()) :: :ok | {:error, String.t()}
-  def check(_url, true = _allow_private), do: :ok
+  @doc """
+  `:ok` when the URL may be fetched. With private targets refused, the one
+  loopback address allowed is this instance's own reference implementation
+  (`own_reference`): it holds only synthetic data, and reaching it on loopback
+  keeps a proxy or login in front of the public URL out of the way.
+  """
+  @spec check(String.t(), boolean(), String.t() | nil) :: :ok | {:error, String.t()}
+  def check(url, allow_private, own_reference \\ Settings.local_reference_url())
 
-  def check(url, false) do
+  def check(_url, true = _allow_private, _own_reference), do: :ok
+
+  def check(url, false, own_reference) do
+    if own_reference?(url, own_reference), do: :ok, else: check_public(url)
+  end
+
+  # Same scheme, host and port as the reference, and a path inside its mount.
+  @spec own_reference?(String.t(), String.t() | nil) :: boolean()
+  defp own_reference?(_url, nil), do: false
+
+  defp own_reference?(url, own_reference) do
+    %URI{scheme: scheme, host: host, port: port, path: mount} = URI.parse(own_reference)
+
+    case URI.parse(url) do
+      %URI{scheme: ^scheme, host: ^host, port: ^port, path: path} when is_binary(path) ->
+        (path == mount or String.starts_with?(path, mount <> "/")) and
+          ".." not in String.split(path, "/")
+
+      _other ->
+        false
+    end
+  end
+
+  @spec check_public(String.t()) :: :ok | {:error, String.t()}
+  defp check_public(url) do
     with %URI{scheme: scheme, host: host} when scheme in ["http", "https"] and is_binary(host) <-
            URI.parse(url),
          {:ok, addresses} <- resolve(host) do
