@@ -78,6 +78,8 @@ defmodule HcpConformance.MixProject do
       # Renders docs/*.md into pages at compile time, and chat replies.
       {:mdex, "~> 0.14"},
       {:req, "~> 0.5"},
+      # The suite connects to a vetted address rather than a name (see HcpConformance.HTTP).
+      {:mint, "~> 1.6"},
       {:boundary, "~> 0.11", runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
