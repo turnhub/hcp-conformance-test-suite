@@ -37,11 +37,11 @@ jobs:
   # warns from) and GitHub's advisories. Ignores live in osv-scanner.toml.
   scan:
     name: Dependency Vulnerability Scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       OSV_SCANNER_IMAGE: ghcr.io/google/osv-scanner:v2.6.0@sha256:afd838850ac1a0fcc15ff4a041dc9ba11123c3f0d2666217a5f0fcf9222b55fa
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Finds every lockfile in the checkout, so a new one is covered by the
       # schedule without touching this file (add it to the paths above too).
