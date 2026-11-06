@@ -118,7 +118,21 @@ defmodule HcpConformance.UnitTest do
             {100, 64, 0, 1},
             {0, 0, 0, 0, 0, 0, 0, 1},
             {0xFD00, 0, 0, 0, 0, 0, 0, 1},
-            {0, 0, 0, 0, 0, 0xFFFF, 0x7F00, 1}
+            {0, 0, 0, 0, 0, 0xFFFF, 0x7F00, 1},
+            # IPv4-compatible (::a.b.c.d), NAT64, local-use NAT64, 6to4 and Teredo
+            # all embed an IPv4 address; documentation space is never routed.
+            {0, 0, 0, 0, 0, 0, 0x7F00, 1},
+            {0x64, 0xFF9B, 0, 0, 0, 0, 0x7F00, 1},
+            {0x64, 0xFF9B, 1, 0, 0, 0, 0x0808, 0x0808},
+            {0x2002, 0x7F00, 1, 0, 0, 0, 0, 1},
+            {0x2002, 0x0A00, 1, 0, 0, 0, 0, 1},
+            {0x2001, 0, 0x4136, 0xE378, 0x8000, 0x63BF, 0x80FF, 0xFFFE},
+            {0x2001, 0x0DB8, 0, 0, 0, 0, 0, 1},
+            {192, 0, 0, 1},
+            {192, 0, 2, 1},
+            {198, 51, 100, 1},
+            {203, 0, 113, 1},
+            {240, 0, 0, 1}
           ] do
         assert TargetGuard.private?(address), inspect(address)
       end
@@ -127,7 +141,11 @@ defmodule HcpConformance.UnitTest do
             {8, 8, 8, 8},
             {1, 1, 1, 1},
             {0x2606, 0x4700, 0, 0, 0, 0, 0, 0x1111},
-            {0, 0, 0, 0, 0, 0xFFFF, 0x0808, 0x0808}
+            {0, 0, 0, 0, 0, 0xFFFF, 0x0808, 0x0808},
+            {0x64, 0xFF9B, 0, 0, 0, 0, 0x0808, 0x0808},
+            {0x2002, 0x0808, 0x0808, 0, 0, 0, 0, 1},
+            {0x2001, 0, 0x4136, 0xE378, 0x8000, 0x63BF, 0xF7F7, 0xF7F7},
+            {0x2001, 0x4860, 0x4860, 0, 0, 0, 0, 0x8888}
           ] do
         refute TargetGuard.private?(address), inspect(address)
       end
@@ -171,9 +189,13 @@ defmodule HcpConformance.UnitTest do
     test "reaches this instance's own reference implementation on loopback, with private targets refused" do
       own = "http://127.0.0.1:4000/reference"
 
-      assert TargetGuard.check(own, false, own) == :ok
-      assert TargetGuard.check(own <> "/.well-known/hcp-configuration", false, own) == :ok
-      assert TargetGuard.check(own <> "/conformance-hook/subjects", false, own) == :ok
+      assert TargetGuard.check(own, false, own) == {:ok, {127, 0, 0, 1}}
+
+      assert TargetGuard.check(own <> "/.well-known/hcp-configuration", false, own) ==
+               {:ok, {127, 0, 0, 1}}
+
+      assert TargetGuard.check(own <> "/conformance-hook/subjects", false, own) ==
+               {:ok, {127, 0, 0, 1}}
     end
 
     test "opens nothing else on loopback for the reference implementation" do
@@ -197,8 +219,55 @@ defmodule HcpConformance.UnitTest do
     test "refuses private targets unless allowed" do
       assert {:error, message} = TargetGuard.check("http://127.0.0.1:4000/v1", false)
       assert message =~ "non-public"
-      assert TargetGuard.check("http://127.0.0.1:4000/v1", true) == :ok
+      assert TargetGuard.check("http://127.0.0.1:4000/v1", true) == {:ok, {127, 0, 0, 1}}
       assert {:error, _message} = TargetGuard.check("file:///etc/passwd", false)
+    end
+
+    test "pins the address it vetted, preferring IPv4, so the connection cannot be rebound" do
+      resolver = fn "vault.example" ->
+        {:ok, [{0x2606, 0x4700, 0, 0, 0, 0, 0, 0x1111}, {1, 1, 1, 1}]}
+      end
+
+      assert TargetGuard.check("https://vault.example/v1", false, nil, resolver: resolver) ==
+               {:ok, {1, 1, 1, 1}}
+
+      v6_only = fn _host -> {:ok, [{0x2606, 0x4700, 0, 0, 0, 0, 0, 0x1111}]} end
+
+      assert TargetGuard.check("https://vault.example/v1", false, nil, resolver: v6_only) ==
+               {:ok, {0x2606, 0x4700, 0, 0, 0, 0, 0, 0x1111}}
+    end
+
+    test "refuses a name with any private address among its answers" do
+      resolver = fn _host -> {:ok, [{1, 1, 1, 1}, {10, 0, 0, 5}]} end
+
+      assert {:error, message} =
+               TargetGuard.check("https://vault.example/v1", false, nil, resolver: resolver)
+
+      assert message =~ "non-public"
+    end
+
+    test "does not echo the resolved address, so the guard is no oracle for internal DNS" do
+      resolver = fn _host -> {:ok, [{10, 1, 2, 3}]} end
+
+      assert {:error, message} =
+               TargetGuard.check("https://corp-db.example/", false, nil, resolver: resolver)
+
+      refute message =~ "10.1.2.3"
+      assert message =~ "corp-db.example"
+    end
+
+    test "resolves the name even when private targets are allowed, so every request is pinned" do
+      resolver = fn "vault.internal" -> {:ok, [{10, 0, 0, 5}]} end
+
+      assert TargetGuard.check("http://vault.internal/", true, nil, resolver: resolver) ==
+               {:ok, {10, 0, 0, 5}}
+
+      failing = fn _host -> {:error, :nxdomain} end
+
+      assert {:error, message} =
+               TargetGuard.check("http://vault.internal/", true, nil, resolver: failing)
+
+      assert message =~ "cannot resolve"
     end
   end
 
