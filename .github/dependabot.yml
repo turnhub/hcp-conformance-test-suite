@@ -1,0 +1,45 @@
+# Dependabot keeps the three things this repository pulls from outside up to
+# date: Hex packages, the GitHub Actions the workflows run, and the images the
+# Dockerfile builds from. Each is weekly, grouped into one pull request, and
+# waits seven days after a release before proposing it: a compromised release
+# is usually pulled within days, and a week keeps us behind that window.
+# Security updates ignore the cooldown, as they should.
+#
+# The images CI jobs run inside (`container:` in .github/workflows/ci.yml) are
+# outside Dependabot's reach; .github/scripts/check_pinned_images.sh keeps them
+# pinned, and bumping them is by hand, with the Dockerfile.
+version: 2
+updates:
+  - package-ecosystem: mix
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      hex:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      images:
+        patterns:
+          - "*"

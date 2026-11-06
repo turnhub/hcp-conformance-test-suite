@@ -17,13 +17,24 @@ env:
   MIX_ENV: test
 
 # One job per guardrail, so each shows as its own check on a pull request.
-# Format, Credo and Dialyzer run on the newest Elixir; the tests on every
-# version the project supports.
+# Everything runs on one Elixir, the one .tool-versions and the Dockerfile use.
+#
+# Every image is pinned to a digest, so a moved tag cannot change what CI runs
+# in; the "Pinned images" job enforces that. Bump the digests here together
+# with the Dockerfile's (which Dependabot proposes); read a new one with
+# `docker buildx imagetools inspect <name>:<tag>`.
 jobs:
+  pinned-images:
+    name: Pinned images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: .github/scripts/check_pinned_images.sh
+
   format:
     name: Formatting
     runs-on: ubuntu-latest
-    container: elixir:1.20
+    container: elixir:1.20.5-otp-28@sha256:9deb9fe8bf7c8cfa02bd3b7b6b1932fbb9c313151eb1e76eba112fdde7628337
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -40,7 +51,7 @@ jobs:
   credo:
     name: Credo
     runs-on: ubuntu-latest
-    container: elixir:1.20
+    container: elixir:1.20.5-otp-28@sha256:9deb9fe8bf7c8cfa02bd3b7b6b1932fbb9c313151eb1e76eba112fdde7628337
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -56,7 +67,7 @@ jobs:
   dialyzer:
     name: Dialyzer
     runs-on: ubuntu-latest
-    container: elixir:1.20
+    container: elixir:1.20.5-otp-28@sha256:9deb9fe8bf7c8cfa02bd3b7b6b1932fbb9c313151eb1e76eba112fdde7628337
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -75,13 +86,9 @@ jobs:
       - run: mix dialyzer --format github
 
   test:
-    name: Tests (Elixir ${{ matrix.elixir }})
+    name: Tests
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        elixir: ["1.18", "1.20"]
-    container: elixir:${{ matrix.elixir }}
+    container: elixir:1.20.5-otp-28@sha256:9deb9fe8bf7c8cfa02bd3b7b6b1932fbb9c313151eb1e76eba112fdde7628337
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -89,7 +96,7 @@ jobs:
           path: |
             deps
             _build
-          key: mix-${{ matrix.elixir }}-${{ hashFiles('mix.lock') }}
+          key: mix-1.20-${{ hashFiles('mix.lock') }}
       - run: mix local.hex --force && mix local.rebar --force
       - run: mix deps.get
       - run: mix deps.unlock --check-unused

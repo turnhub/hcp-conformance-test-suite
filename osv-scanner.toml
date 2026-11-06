@@ -1,0 +1,14 @@
+# Accepted vulnerabilities for the dependency scan in
+# .github/workflows/dependency_scan.yml. The scan only fails on HIGH or
+# CRITICAL, so only those need an entry here.
+#
+# Ignore by CVE ID: it also matches the EEF-CVE-* and GHSA-* IDs it is an alias
+# of. An entry is repo-wide, covering that CVE in every lockfile and version.
+# For a wait rather than an accepted risk, set ignoreUntil so the scan starts
+# failing again when it lapses. Every entry says why the risk does not apply
+# here, so the next reader can tell whether it still holds.
+#
+# [[IgnoredVulns]]
+# id = "CVE-2026-00000"
+# reason = "…"
+# ignoreUntil = 2026-12-31
