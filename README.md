@@ -295,9 +295,6 @@ Give the container port 4000, point the liveness and readiness probes at
 Secret, and set `PHX_HOST` to the ingress host. Set `BIND_ADDRESS=0.0.0.0` if the
 pods have no IPv6.
 
-**Fly.io**: `fly.toml` is included. Set `app` and `PHX_HOST`, run
-`fly secrets set SECRET_KEY_BASE=…`, then `fly deploy`.
-
 **Google Cloud Run**:
 
 ```bash

@@ -101,7 +101,7 @@ if config_env() == :prod do
       scheme: System.get_env("PHX_URL_SCHEME", "https")
     ],
     http: [
-      # All interfaces, IPv6 included (Fly.io needs it). Hosts without IPv6
+      # All interfaces, IPv6 included. Hosts without IPv6
       # set BIND_ADDRESS=0.0.0.0.
       ip: bind_address
     ],

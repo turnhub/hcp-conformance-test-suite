@@ -9,7 +9,7 @@ config :hcp_conformance, HcpConformanceWeb.Endpoint,
   cache_static_manifest: "priv/static/cache_manifest.json"
 
 # Force using SSL in production. This also sets the "strict-security-transport" header,
-# known as HSTS. The TLS proxy in front (the Kubernetes ingress, or Fly) says which
+# known as HSTS. The TLS proxy in front (the Kubernetes ingress) says which
 # scheme the visitor used in x-forwarded-proto. Health checks come straight from the
 # platform over plain http, so they are exempt: a redirect there never succeeds.
 # Note `:force_ssl` is required to be set at compile-time.
