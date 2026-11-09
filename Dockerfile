@@ -6,8 +6,8 @@
 #
 # Configuration is environment variables; see README.md.
 
-ARG ELIXIR_IMAGE=elixir:1.18
-ARG RUNNER_IMAGE=debian:trixie-slim
+ARG ELIXIR_IMAGE=elixir:1.20.5-otp-28@sha256:9deb9fe8bf7c8cfa02bd3b7b6b1932fbb9c313151eb1e76eba112fdde7628337
+ARG RUNNER_IMAGE=debian:trixie-20261104-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 
 FROM ${ELIXIR_IMAGE} AS builder
 

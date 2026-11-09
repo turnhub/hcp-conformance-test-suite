@@ -1,0 +1,109 @@
+name: Dependency Vulnerability Scan
+
+# PR and push runs are scoped to dependency files so an unrelated PR is never
+# failed by a CVE it did not introduce. That alone would leave a CVE disclosed
+# against an unchanged dependency invisible until someone next touched the
+# lockfile, so the schedule rescans main every 6 hours against the current
+# vulnerability database. A failed scheduled run is reported the way GitHub
+# reports any failed scheduled workflow: to whoever last touched this file.
+on:
+  schedule:
+    # Off the top of the hour to dodge the cron queue backlog GitHub gets at :00.
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - "mix.exs"
+      - "mix.lock"
+      - "osv-scanner.toml"
+      - ".github/workflows/dependency_scan.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "mix.exs"
+      - "mix.lock"
+      - "osv-scanner.toml"
+      - ".github/workflows/dependency_scan.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  # OSV-Scanner rather than Trivy: Trivy only knows a Hex advisory once GitHub
+  # has reviewed it, which can lag the Erlang Ecosystem Foundation's publication
+  # by a month or more. OSV carries both the EEF feed (the one `mix deps.get`
+  # warns from) and GitHub's advisories. Ignores live in osv-scanner.toml.
+  scan:
+    name: Dependency Vulnerability Scan
+    runs-on: ubuntu-24.04
+    env:
+      OSV_SCANNER_IMAGE: ghcr.io/google/osv-scanner:v2.6.0@sha256:afd838850ac1a0fcc15ff4a041dc9ba11123c3f0d2666217a5f0fcf9222b55fa
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Finds every lockfile in the checkout, so a new one is covered by the
+      # schedule without touching this file (add it to the paths above too).
+      - name: Run OSV-Scanner
+        run: |
+          status=0
+          docker run --rm --volume "$PWD:/src" --workdir /src "$OSV_SCANNER_IMAGE" \
+            scan source \
+            --recursive \
+            --config=osv-scanner.toml \
+            --format=json \
+            --output-file=osv-results.json \
+            . || status=$?
+          # 1 means it found advisories, which the next step weighs by severity.
+          # Anything higher is the scan itself failing, e.g. the OSV API.
+          if [ "$status" -gt 1 ]; then
+            exit "$status"
+          fi
+
+      # Lists every advisory, but fails only on HIGH or CRITICAL. Severity is
+      # the advisory's own rating where it has one (GitHub's), otherwise derived
+      # from its CVSS score, as `mix deps.get` does for the EEF's Hex advisories.
+      - name: Fail on HIGH or CRITICAL advisories
+        run: |
+          jq -c '
+            def rank: {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}[.] // 0;
+            .results[]? as $r | $r.packages[]? as $p | $p.groups[]?
+            | .ids as $ids
+            | [$p.vulnerabilities[]? | select(.id | IN($ids[]))] as $vulns
+            | (.max_severity // "" | tonumber? // null) as $score
+            | [
+                $vulns[].database_specific.severity // empty
+                | ascii_upcase | sub("MODERATE"; "MEDIUM") | select(rank > 0)
+              ] as $ratings
+            | {
+                file: ($r.source.path | ltrimstr("/src/")),
+                package: "\($p.package.name) \($p.package.version)",
+                id: ([.aliases[]? | select(startswith("CVE-"))][0] // $ids[0]),
+                score: $score,
+                severity: (
+                  if ($ratings | length) > 0 then $ratings | max_by(rank)
+                  elif $score == null then "UNKNOWN"
+                  elif $score >= 9 then "CRITICAL"
+                  elif $score >= 7 then "HIGH"
+                  elif $score >= 4 then "MEDIUM"
+                  else "LOW" end
+                ),
+                summary: ($vulns[0].summary // "")
+              }' osv-results.json > findings.jsonl
+
+          if [ ! -s findings.jsonl ]; then
+            echo "No advisories found."
+            exit 0
+          fi
+
+          jq -rs 'sort_by(-(.severity | {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1}[.] // 0), -(.score // 0))[]
+            | [.severity, (.score // "-"), .package, .id, .file, .summary] | @tsv' findings.jsonl |
+            awk -F'\t' '{ printf "%-8s  %-4s  %-28s  %-16s  %-24s  %s\n", $1, $2, $3, $4, $5, $6 }'
+
+          blocking=$(jq -r 'select(.severity == "HIGH" or .severity == "CRITICAL")
+            | "::error file=\(.file),title=\(.id) in \(.package) (\(.severity))::\(.summary | gsub("%"; "%25"))"' findings.jsonl)
+          if [ -n "$blocking" ]; then
+            echo "$blocking"
+            exit 1
+          fi

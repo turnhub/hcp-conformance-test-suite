@@ -29,7 +29,7 @@ exists for.
 | Specification | HCP v1, 1.0-draft-4 (September 2026) |
 | Checks | 94 (see [docs/CHECKS.md](docs/CHECKS.md)) |
 | Transports | RESTful HTTP in full; MCP manifest only |
-| Built with | Elixir 1.17+, Phoenix 1.8 and LiveView, daisyUI; no database |
+| Built with | Elixir 1.20, Phoenix 1.8 and LiveView, daisyUI; no database |
 | Guardrails | Boundary, Credo (strict), Dialyzer and the test suite, locally (`mix precommit`) and in GitHub Actions |
 
 ## Contents
@@ -295,13 +295,6 @@ Give the container port 4000, point the liveness and readiness probes at
 Secret, and set `PHX_HOST` to the ingress host. Set `BIND_ADDRESS=0.0.0.0` if the
 pods have no IPv6.
 
-**Cloudflare** (paused for now; a Container behind a Worker, on workers.dev): see
-[`cloudflare/README.md`](cloudflare/README.md). It deploys with `npm run deploy` or on every push
-to `main` through Workers Builds, and needs the Workers Paid plan.
-
-**Fly.io**: `fly.toml` is included. Set `app` and `PHX_HOST`, run
-`fly secrets set SECRET_KEY_BASE=…`, then `fly deploy`.
-
 **Google Cloud Run**:
 
 ```bash
@@ -376,9 +369,19 @@ it does not declare: the suite (`HcpConformance`), the reference implementation
 other through their exports. Credo runs strict, Dialyzer checks the typespecs,
 and new behaviour starts as a failing test. GitHub Actions
 (`.github/workflows/ci.yml`) runs each guardrail as its own check on every push to
-`main` and every pull request: formatting, Credo, Dialyzer, the tests on Elixir
-1.18 and 1.20, and a smoke test that builds the release image and runs the suite
-from it against its own reference implementation.
+`main` and every pull request: formatting, Credo, Dialyzer, the tests, and a
+smoke test that builds the release image and runs the suite from it against its
+own reference implementation.
+
+**Supply chain.** Everything pulled from outside is pinned: GitHub Actions to a
+commit SHA, and every container image (the CI jobs' and the Dockerfile's) to a
+digest, which the "Pinned images" check enforces. Dependabot
+(`.github/dependabot.yml`) proposes Hex, Actions and image updates weekly, a
+week after each release so a compromised one is usually pulled before we take
+it. OSV-Scanner (`.github/workflows/dependency_scan.yml`) scans `mix.lock`
+against the Erlang Ecosystem Foundation's and GitHub's advisories on every
+dependency change and every six hours on `main`, failing on HIGH or CRITICAL;
+an accepted risk goes in `osv-scanner.toml` with its reason.
 
 The test endpoint listens on port 4002, so the LiveView and API tests run real
 suites against the reference implementation the app serves.

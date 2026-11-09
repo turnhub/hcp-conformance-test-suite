@@ -13,7 +13,5 @@ priv/static/assets
 priv/static/cache_manifest.json
 test
 reports
-# The Cloudflare Worker that fronts the image is not part of it
-cloudflare
 # Dialyzer PLTs
 priv/plts
