@@ -33,12 +33,6 @@ defmodule HcpConformance.HTTP do
             content_type: String.t() | nil,
             exchange_id: pos_integer()
           }
-
-    @doc "A response header, by lowercase name."
-    @spec header(t(), String.t()) :: String.t() | nil
-    def header(%__MODULE__{headers: headers}, name) do
-      Enum.find_value(headers, fn {key, value} -> if key == name, do: value end)
-    end
   end
 
   defmodule TransportError do

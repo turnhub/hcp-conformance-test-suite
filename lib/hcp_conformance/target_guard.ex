@@ -112,9 +112,9 @@ defmodule HcpConformance.TargetGuard do
     Enum.find(addresses, hd(addresses), &(tuple_size(&1) == 4))
   end
 
-  @doc "The addresses a host name (or address literal) stands for."
+  # The addresses a host name (or address literal) stands for.
   @spec resolve(String.t()) :: {:ok, [:inet.ip_address(), ...]} | {:error, term()}
-  def resolve(host) do
+  defp resolve(host) do
     charlist = String.to_charlist(host)
 
     case :inet.parse_address(charlist) do
