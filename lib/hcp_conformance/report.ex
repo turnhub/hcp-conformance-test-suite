@@ -18,9 +18,6 @@ defmodule HcpConformance.Report do
   @suite_version Mix.Project.config()[:version]
   @spec_version "1.0-draft-4"
 
-  @spec suite_version() :: String.t()
-  def suite_version, do: @suite_version
-
   @spec spec_version() :: String.t()
   def spec_version, do: @spec_version
 
@@ -49,7 +46,7 @@ defmodule HcpConformance.Report do
   end
 
   @spec verdict([map()]) :: String.t()
-  def verdict(results) do
+  defp verdict(results) do
     must = Enum.filter(results, &(&1.level == :must))
 
     cond do
