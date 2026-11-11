@@ -5,6 +5,11 @@ defmodule HcpConformance.MixProject do
     [
       app: :hcp_conformance,
       version: "0.1.0",
+      description: "Conformance test suite for the Human Context Protocol (HCP) v1",
+      package: [
+        licenses: ["AGPL-3.0-or-later"],
+        links: %{"GitHub" => "https://github.com/turnhub/hcp-conformance-test-suite"}
+      ],
       elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,

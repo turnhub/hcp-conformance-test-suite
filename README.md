@@ -40,7 +40,6 @@ exists for.
 - [What it checks](#what-it-checks)
 - [Reading a report](#reading-a-report)
 - [Hosting it](#hosting-it)
-- [Running it against Turn's hcp_vault](#running-it-against-turns-hcp_vault)
 - [Developing the suite](#developing-the-suite)
 - [Known limits](#known-limits)
 
@@ -288,9 +287,9 @@ docker run -p 4000:4000 \
 ```
 
 **Kubernetes**: publishing a GitHub release runs `.github/workflows/release.yml`,
-which pushes the image to
-`europe-west3-docker.pkg.dev/turn-tooling/turnhub/hcp-conformance:<release tag>`.
-Give the container port 4000, point the liveness and readiness probes at
+which pushes the image to the Artifact Registry named by the repository's
+`GCP_REGISTRY` variable, tagged `hcp-conformance:<release tag>` (the workflow
+says which variables it needs). Give the container port 4000, point the liveness and readiness probes at
 `GET /health` (exempt from the HTTPS redirect), take `SECRET_KEY_BASE` from a
 Secret, and set `PHX_HOST` to the ingress host. Set `BIND_ADDRESS=0.0.0.0` if the
 pods have no IPv6.
@@ -335,23 +334,6 @@ then applies per instance.
 - Visitors hand the instance credentials for their own systems. Run a public
   instance only where people can trust its operator, or put it behind
   `UI_BASIC_AUTH`.
-
-## Running it against Turn's hcp_vault
-
-Turn's vault app (`priv/apps/lua/dev/hcp_vault` in [turnhub/engage](https://github.com/turnhub/engage)) serves HCP under its app URL:
-
-```
---target https://whatsapp.turn.io/apps/<app install uuid>
-```
-
-It has no conformance hook yet, so run it in static mode. Get a person token with
-the vault's `generate_person_token` journey function (one hour, 24 at most), and
-pass it with `--person-token`. The vault mints no client tokens yet, so checks
-needing an agent are skipped and the verdict is `incomplete`.
-
-Adding the hook (docs/HOOK.md) to the vault would enable every check. Its
-kernel already issues grants as the person's act, so the hook is a thin wrapper
-over `Hcp.issue_grant` and `Tokens.generate`.
 
 ## Developing the suite
 
@@ -432,3 +414,9 @@ Layout:
 - **The JSON Schema**: HCP has not published its Tier 1 schema (Appendix D). The
   envelope rules are written out from §2.2 and will be swapped for the schema
   once it exists.
+
+## License
+
+[GNU Affero General Public License v3.0](LICENSE). A hosted instance is a
+network service in the AGPL's sense: if you modify the suite and let others use
+it over a network, offer them the modified source.
