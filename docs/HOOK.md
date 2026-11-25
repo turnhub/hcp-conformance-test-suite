@@ -189,12 +189,15 @@ and `operator` in place of v1's `scopes`, `restrictions` and `actorType`:
 | `clientId`, `clientName` | yes | As for v1: the Context Client the grant is issued to. |
 | `operator` | yes | The client's Client Operator (§3.2.8), recorded as `client.operator` on the grant. The suite names operators of its own to test standing rules, so record what is sent. |
 | `access` | yes | The grant's authorization details (§6.1.5): `actions` (`read`, `write`, `provenance`), `categories`, and the `purposes` approved, each with a `code` and a `description`. Add the `type` yourself. |
+| `access[].onwardSharing` | no | Elects onward sharing for the detail (§6.1.4, §6.1.5), as the person's separate act would: `{}` for any organization, or `{"domains": [...]}`. Refuse it for a detail that does not read, or has a category above Low sensitivity. |
 | `access[].narrowedTo` | no | Narrows the detail (§6.1.5.1). The suite uses `entryIds`, holding entry `id`s. A key you do not support must be refused: the suite sends one to check that unknown narrowing fails closed. |
 | `grantType`, `expiresInSeconds` | as for v1 | Temporary or persistent, and the lifetime of a temporary grant. |
 
 The response is v1's: `grantId`, `token` and `expiresAt`. The token
-authenticates the Context Client, which registers no notification endpoint, so
-its disclosures are usable for an hour at most (§7.6).
+authenticates the Context Client on every binding the implementation exposes:
+as a bearer on the HTTP Binding and on the MCP endpoint alike. The client
+registers no notification endpoint, so its disclosures are usable for an hour
+at most (§7.6).
 
 The grant must be indistinguishable from one obtained through the real channel:
 listed by `GET /v2/grants` as a grant object, enforced on every request, and
@@ -205,6 +208,7 @@ recorded as `grant.issued` with its `access`, `grantType`, `expiresAt` and a
 | --- | --- |
 | A detail with no purpose, an unknown action or a category you do not hold | §6.1.5, §6.1.5.2 |
 | A `narrowedTo` key you do not support | §6.1.5.1, rule 2 |
+| `onwardSharing` on a detail with a category above Low sensitivity | §6.1.5 |
 | A category a standing rule denies the `operator` | §6.3 |
 | A temporary grant longer than 24 hours | §6.1.4 |
 

@@ -29,6 +29,28 @@ defmodule HcpConformance.V2.ReferenceConformanceTest do
     assert length(report.results) == length(Catalog.all("2.0"))
   end
 
+  test "an MCP-only target: the MCP checks run, and what needs the HTTP Binding does not apply" do
+    target = ReferenceTarget.start!(version: "2.0", bindings: ["mcp"])
+    {:ok, report} = HcpConformance.run(ReferenceTarget.hook_config(target))
+
+    assert ReferenceTarget.failures(report, [:fail, :error, :warn, :skip]) == ""
+    assert report.verdict == "pass"
+    assert :rest not in report.capabilities and :mcp in report.capabilities
+
+    statuses = Map.new(report.results, &{&1.id, &1.status})
+    # A tool call needs nothing but the grant.
+    assert statuses["mcp.query"] == :pass
+    assert statuses["mcp.get_entry"] == :pass
+    assert statuses["mcp.revise"] == :pass
+    assert statuses["mcp.category_challenge"] == :pass
+    assert statuses["mcp.existence_hidden"] == :pass
+    # The governance plane is carried by the HTTP Binding alone.
+    assert statuses["grants.revocation"] == :na
+    assert statuses["audit.event_structure"] == :na
+    assert statuses["mcp.create"] == :na
+    assert statuses["mcp.audited"] == :na
+  end
+
   test "static mode: no failures, and checks needing the hook are skipped", %{target: target} do
     # A v2 entry names its Context Subject, so a run with supplied tokens is told who that is.
     subject = ReferenceTarget.subject!(target)

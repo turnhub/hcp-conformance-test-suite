@@ -53,6 +53,14 @@ defmodule HcpConformance.Reference.ModelV2 do
   @spec category?(term()) :: boolean()
   def category?(category), do: Enum.any?(@categories, &(elem(&1, 0) == category))
 
+  @doc "Whether every category is a registered one whose default sensitivity is Low."
+  @spec low_sensitivity?([String.t()]) :: boolean()
+  def low_sensitivity?(categories) do
+    Enum.all?(categories, fn category ->
+      Enum.any?(@categories, fn {id, _, _, level} -> id == category and level == "low" end)
+    end)
+  end
+
   @spec high_sensitivity?([String.t()]) :: boolean()
   def high_sensitivity?(categories),
     do: Enum.any?(@categories, fn {id, _, _, level} -> level == "high" and id in categories end)
@@ -208,7 +216,7 @@ defmodule HcpConformance.Reference.ModelV2 do
          %{"actions" => actions, "categories" => categories, "purposes" => purposes} = detail
        ) do
     actions?(actions) and every?(categories, &category?/1) and every?(purposes, &purpose?/1) and
-      narrowing?(detail["narrowedTo"])
+      narrowing?(detail["narrowedTo"]) and sharing?(detail)
   end
 
   defp detail?(_detail), do: false
@@ -219,6 +227,15 @@ defmodule HcpConformance.Reference.ModelV2 do
   end
 
   defp every?(list, valid?), do: is_list(list) and list != [] and Enum.all?(list, valid?)
+
+  # Onward sharing is elected only for a detail that reads, all of whose
+  # categories are Low sensitivity (§6.1.5).
+  defp sharing?(%{"onwardSharing" => sharing, "actions" => actions, "categories" => categories}) do
+    is_map(sharing) and "read" in actions and low_sensitivity?(categories) and
+      (is_nil(sharing["domains"]) or every?(sharing["domains"], &is_binary/1))
+  end
+
+  defp sharing?(_detail), do: true
 
   defp purpose?(%{"code" => code, "description" => description}),
     do: is_binary(code) and code != "" and is_binary(description)
@@ -368,6 +385,45 @@ defmodule HcpConformance.Reference.ModelV2 do
       },
       "useUntil" => DateTime.to_iso8601(use_until(entry, now, long_use?))
     }
+    |> put_shareable(shareable?(grant, entry))
+  end
+
+  # §7.4: present, and true, only where the client may share the entry onward.
+  defp put_shareable(disclosure, true), do: Map.put(disclosure, "onwardSharing", true)
+  defp put_shareable(disclosure, false), do: disclosure
+
+  @doc """
+  Whether the client holding `grant` may share an entry onward (§3.12): a detail
+  that reads the entry elected onward sharing, and every category of the entry,
+  those the grant does not cover included, is Low sensitivity.
+  """
+  @spec shareable?(map(), map()) :: boolean()
+  def shareable?(grant, entry), do: sharing(grant, entry) != nil
+
+  @doc "Whether a share with the organization at `domain` is one the grant allows for the entry."
+  @spec share_permitted?(map(), map(), String.t()) :: boolean()
+  def share_permitted?(grant, entry, domain) do
+    case sharing(grant, entry) do
+      nil ->
+        false
+
+      sharing ->
+        (is_nil(sharing["domains"]) or operator_matches?(sharing["domains"], "https://" <> domain)) and
+          not operator_matches?(sharing["notTo"] || [], "https://" <> domain)
+    end
+  end
+
+  # The onwardSharing election of the detail through which the grant reads the entry.
+  defp sharing(grant, entry) do
+    categories = entry["classification"]["categories"]
+
+    if low_sensitivity?(categories),
+      do: Enum.find_value(grant["access"], &election(&1, categories, entry["id"]))
+  end
+
+  defp election(detail, categories, id) do
+    reads? = "read" in detail["actions"] and Enum.any?(detail["categories"], &(&1 in categories))
+    if reads? and within?(detail["narrowedTo"], id), do: detail["onwardSharing"]
   end
 
   defp confirmed?(confirmations),

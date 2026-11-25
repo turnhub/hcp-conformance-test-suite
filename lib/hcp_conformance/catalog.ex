@@ -29,6 +29,8 @@ defmodule HcpConformance.Catalog do
     V2.Checks.Grants,
     V2.Checks.Governance,
     V2.Checks.Rules,
+    V2.Checks.Sharing,
+    V2.Checks.Mcp,
     V2.Checks.Audit,
     V2.Checks.Export,
     V2.Checks.Responses
