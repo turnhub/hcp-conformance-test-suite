@@ -18,9 +18,13 @@ defmodule HcpConformance.Application do
       {Phoenix.PubSub, name: HcpConformance.PubSub},
       # Each running suite registers here, so the number running at once can be capped.
       {Registry, keys: :duplicate, name: HcpConformance.RunRegistry},
-      # The reference HCP implementation served at /reference keeps its synthetic
-      # subjects in memory.
+      # The reference HCP implementations served at /reference (v1) and
+      # /reference/hcp-v2 (v2) keep their synthetic subjects in memory.
       {HcpConformance.Reference.Store, name: HcpConformance.Reference.DefaultStore},
+      Supervisor.child_spec(
+        {HcpConformance.Reference.Store, name: HcpConformance.Reference.DefaultStoreV2},
+        id: HcpConformance.Reference.DefaultStoreV2
+      ),
       HcpConformanceWeb.Endpoint
     ]
 

@@ -17,10 +17,11 @@ defmodule HcpConformanceWeb.PageControllerTest do
              "POST {hook_url}/subjects",
              "POST {hook_url}/subjects/{subjectId}/grants",
              "DELETE {hook_url}/subjects/{subjectId}",
-             "What the suite does with it"
+             "What the suite does with it",
+             "HCP v2"
            ]
 
-    assert spec |> LazyHTML.query("table.table") |> Enum.count() == 3
+    assert spec |> LazyHTML.query("table.table") |> Enum.count() == 5
     refute LazyHTML.text(spec) =~ "## "
   end
 end

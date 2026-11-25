@@ -8,7 +8,7 @@ defmodule HcpConformanceWeb.SessionControllerTest do
     document = LazyHTML.from_document(html)
 
     refute Enum.empty?(LazyHTML.query(document, "#connect-form"))
-    refute Enum.empty?(LazyHTML.query(document, "#reference-form"))
+    refute Enum.empty?(LazyHTML.query(document, "#reference-form-v1"))
   end
 
   test "the reference implementation is reached on loopback, past any proxy in front", %{
@@ -21,12 +21,12 @@ defmodule HcpConformanceWeb.SessionControllerTest do
 
     assert ["#{local}"] ==
              document
-             |> LazyHTML.query("#reference-form input[name='connection[target]']")
+             |> LazyHTML.query("#reference-form-v1 input[name='connection[target]']")
              |> LazyHTML.attribute("value")
 
     assert [local <> "/conformance-hook"] ==
              document
-             |> LazyHTML.query("#reference-form input[name='connection[hook_url]']")
+             |> LazyHTML.query("#reference-form-v1 input[name='connection[hook_url]']")
              |> LazyHTML.attribute("value")
   end
 

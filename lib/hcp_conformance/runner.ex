@@ -36,13 +36,14 @@ defmodule HcpConformance.Runner do
     notify = Keyword.get(opts, :on_event, fn _event -> :ok end)
     started_at = DateTime.utc_now()
     ctx = Context.start(config, on_exchange: &notify.({:exchange, Transcript.serializable(&1)}))
-    checks = Catalog.select(config.groups, config.only)
+    checks = Catalog.select(ctx.spec_version, config.groups, config.only)
     {main, post} = Enum.split_with(checks, &(&1.phase == :main))
 
     notify.(
       {:started,
        %{
          total: length(checks),
+         spec_version: ctx.spec_version,
          capabilities: ctx.capabilities,
          setup_notes: ctx.setup_notes
        }}
@@ -153,7 +154,7 @@ defmodule HcpConformance.Runner do
       :person -> "a person credential"
       :agent -> "an agent credential with read and write on the primary category"
       :hook -> "the conformance hook"
-      :rest -> "the REST transport"
+      :rest -> "the HTTP transport"
       :mcp -> "the MCP transport"
       :second_category -> "a second supported category"
       other -> to_string(other)

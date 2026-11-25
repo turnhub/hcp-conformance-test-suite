@@ -9,9 +9,10 @@ defmodule HcpConformanceWeb.SessionController do
 
   alias HcpConformance.Runs
   alias HcpConformance.Settings
+  alias HcpConformance.Spec
   alias HcpConformanceWeb.ReferenceMount
 
-  @fields ~w(target discovery_url hook_url hook_secret person_token agent_token subject_did category)
+  @fields ~w(target discovery_url hook_url hook_secret person_token agent_token subject_did category spec_version)
   @secrets ~w(hook_secret person_token agent_token)
 
   @doc "The connection fields a session may hold."
@@ -59,19 +60,27 @@ defmodule HcpConformanceWeb.SessionController do
       page_title: "Connect",
       form: Phoenix.Component.to_form(values, as: :connection),
       connection: connection,
-      reference: reference()
+      versions: Enum.map(Spec.versions(), &{Spec.label(&1), &1}),
+      references: references()
     )
   end
 
-  defp reference do
+  # One reference implementation per specification version, each with its hook.
+  defp references do
     if Settings.reference_server?() do
-      base = ReferenceMount.local_url()
+      for version <- Spec.versions() do
+        base = ReferenceMount.local_url(version)
 
-      %{
-        target: base,
-        hook_url: base <> "/conformance-hook",
-        hook_secret: Settings.reference_hook_secret()
-      }
+        %{
+          version: version,
+          label: Spec.label(version),
+          target: base,
+          hook_url: base <> "/conformance-hook",
+          hook_secret: Settings.reference_hook_secret()
+        }
+      end
+    else
+      []
     end
   end
 end

@@ -5,11 +5,15 @@ defmodule HcpConformanceWeb.ApiController do
 
       POST /api/runs   {"target": …, "hook_url": …, "hook_secret": …}  -> 200 report
       GET  /api/checks                                                   -> the catalogue
+
+  `spec_version` (`"1.0"` or `"2.0"`) picks the specification: in a run's body,
+  where leaving it out reads the version from the target's discovery document,
+  and as a query parameter of the catalogue, which defaults to v1.
   """
 
   use HcpConformanceWeb, :controller
 
-  alias HcpConformance.{Catalog, Runs}
+  alias HcpConformance.{Catalog, Runs, Spec}
   alias HcpConformanceWeb.SessionController
 
   def create(conn, params) do
@@ -30,14 +34,24 @@ defmodule HcpConformanceWeb.ApiController do
     end
   end
 
-  def checks(conn, _params) do
-    checks =
-      Enum.map(
-        Catalog.all(),
-        &Map.take(&1, [:id, :section, :level, :title, :group, :requires, :phase])
-      )
+  def checks(conn, params) do
+    case Spec.parse(params["spec_version"]) do
+      {:ok, version} ->
+        version = version || Spec.default()
 
-    json(conn, %{checks: checks})
+        checks =
+          Enum.map(
+            Catalog.all(version),
+            &Map.take(&1, [:id, :section, :level, :title, :group, :requires, :phase])
+          )
+
+        json(conn, %{spec_version: Spec.draft(version), checks: checks})
+
+      :error ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: "unknown spec_version"})
+    end
   end
 
   def health(conn, _params), do: text(conn, "ok")

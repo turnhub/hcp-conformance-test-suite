@@ -1,8 +1,22 @@
 <Layouts.app flash={@flash}>
   <.header>
     Checks
-    <:subtitle>{length(@checks)} checks against HCP v1 1.0-draft-4.</:subtitle>
+    <:subtitle>
+      {length(@checks)} checks against {List.keyfind(@versions, @version, 0) |> elem(1)}.
+    </:subtitle>
   </.header>
+
+  <div role="tablist" class="tabs tabs-border" id="check-versions">
+    <.link
+      :for={{version, label} <- @versions}
+      href={~p"/checks?spec_version=#{version}"}
+      role="tab"
+      id={"checks-v#{String.first(version)}"}
+      class={["tab", version == @version && "tab-active"]}
+    >
+      {label}
+    </.link>
+  </div>
 
   <div class="overflow-x-auto">
     <.table id="checks" rows={@checks} row_id={&"check-#{&1.id}"}>

@@ -33,6 +33,14 @@ defmodule HcpConformanceWeb.ChatLive do
   @max_audit 60
 
   @impl true
+  def mount(_params, %{"connection" => %{"spec_version" => "2.0"}}, socket) do
+    # The vault client speaks HCP v1; a v2 target has the conformance run only.
+    {:ok,
+     socket
+     |> put_flash(:info, "The chat page works with HCP v1 targets. A v2 target has the run.")
+     |> redirect(to: ~p"/run")}
+  end
+
   def mount(_params, %{"connection" => connection} = session, socket) when is_map(connection) do
     case Runs.config(connection) do
       {:ok, config} ->

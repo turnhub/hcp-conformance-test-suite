@@ -150,3 +150,9 @@ jobs:
             --target http://127.0.0.1:4000/reference \
             --hook-url http://127.0.0.1:4000/reference/conformance-hook \
             --hook-secret reference-hook-secret --allow-private --strict
+      - name: Run the v2 checks from the image against its own v2 reference implementation
+        run: |
+          docker run --rm --network host hcp-conformance bin/conformance \
+            --target http://127.0.0.1:4000/reference/hcp-v2 \
+            --hook-url http://127.0.0.1:4000/reference/hcp-v2/conformance-hook \
+            --hook-secret reference-hook-secret --allow-private --strict

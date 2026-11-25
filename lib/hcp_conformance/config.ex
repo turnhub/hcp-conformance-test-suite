@@ -11,7 +11,12 @@ defmodule HcpConformance.Config do
     existing subject. Checks that need grants created on demand are skipped.
   - **anonymous**: no credentials. Only the discovery document and the
     unauthenticated transport checks run.
+
+  `spec_version` picks the specification to check against (`HcpConformance.Spec`).
+  Left out, it is read from the target's discovery document.
   """
+
+  alias HcpConformance.Spec
 
   @enforce_keys [:target]
   defstruct [
@@ -23,6 +28,7 @@ defmodule HcpConformance.Config do
     :agent_token,
     :subject_did,
     :category,
+    :spec_version,
     groups: nil,
     only: nil,
     allow_private: false,
@@ -47,6 +53,7 @@ defmodule HcpConformance.Config do
       agent_token: attrs["agent_token"],
       subject_did: attrs["subject_did"],
       category: attrs["category"],
+      spec_version: attrs["spec_version"],
       groups: list(attrs["groups"]),
       only: list(attrs["only"]),
       allow_private: attrs["allow_private"] in [true, "true", "1"],
@@ -75,6 +82,7 @@ defmodule HcpConformance.Config do
       hook_url: config.hook_url,
       mode: mode(config),
       category: config.category,
+      spec_version: config.spec_version,
       groups: config.groups,
       only: config.only,
       label: config.label,
@@ -96,7 +104,21 @@ defmodule HcpConformance.Config do
         {:error, "hook_secret is required with hook_url"}
 
       true ->
-        {:ok, %{config | target: config.target || base_from_discovery(config.discovery_url)}}
+        with_version(%{
+          config
+          | target: config.target || base_from_discovery(config.discovery_url)
+        })
+    end
+  end
+
+  defp with_version(config) do
+    case Spec.parse(config.spec_version) do
+      {:ok, version} ->
+        {:ok, %{config | spec_version: version}}
+
+      :error ->
+        {:error,
+         "spec_version must be one of #{Enum.join(Spec.versions(), ", ")}, or auto to read it from the target"}
     end
   end
 
