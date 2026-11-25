@@ -278,6 +278,9 @@ just a sample.
 
 ## HCP v2
 
+[docs/V1-TO-V2.md](docs/V1-TO-V2.md) is a one-page summary of what moved between
+the versions and what that means for an implementer.
+
 v2 reorganizes the protocol rather than extending it: conformance claims by
 Part instead of one level, a Management Client and Context Clients on two
 planes, entries disclosed to clients under grant-scoped references with a
@@ -467,6 +470,7 @@ Layout:
 | `lib/hcp_conformance_web/exchanges.ex`, `markdown.ex` | The HTTP exchange component both pages show; Markdown for docs pages and replies |
 | `docs/HOOK.md`, `docs/CHECKS.md`, `docs/CHECKS-v2.md` | The hook protocol (also served at `/hook`) and the check catalogues (`/checks` lists the same checks) |
 | `docs/V2.md` | v2 in the suite: coverage, gaps, and review notes on the draft |
+| `docs/V1-TO-V2.md` | What moved between v1 and v2, and what it means for implementers |
 
 ## Known limits
 
