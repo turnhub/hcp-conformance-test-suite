@@ -14,9 +14,17 @@ defmodule HcpConformance.Vault do
   It reuses the suite's run context: discovery, endpoints, the private-network
   guard, and a transcript that redacts every credential, so `traced/2` can show
   each operation's HTTP exchanges.
+
+  It speaks the version the vault does (`version/1`). Against HCP v2 the person
+  is a Management Client and an assistant a Context Client: what `recall/4`
+  returns is a disclosure under the grant's own `ref` (v2 §7.4), a grant carries
+  the purpose the person approved, and the person can `confirm/3` or reject what
+  an assistant wrote. `HcpConformance.Vault.V2` holds what goes on the v2 wire.
+  The functions that read a memory take either version's shape.
   """
 
-  alias HcpConformance.{Config, Context, Fixtures, HTTP, Transcript}
+  alias HcpConformance.{Config, Context, Fixtures, HTTP, Transcript, V2.Target}
+  alias HcpConformance.Vault.V2
 
   @enforce_keys [:context]
   defstruct [:context]
@@ -60,6 +68,10 @@ defmodule HcpConformance.Vault do
     Enum.each([context.transcript, context.state], &stop/1)
   end
 
+  @doc "The specification version the vault speaks, as `HcpConformance.Spec` names it."
+  @spec version(t()) :: String.t()
+  def version(%__MODULE__{context: context}), do: context.spec_version
+
   @doc "Whether grants can be issued here: only through the conformance hook."
   @spec can_issue?(t()) :: boolean()
   def can_issue?(%__MODULE__{context: context}), do: Context.has?(context, :hook)
@@ -74,11 +86,21 @@ defmodule HcpConformance.Vault do
 
   @doc "The categories the vault supports, from its discovery document."
   @spec categories(t()) :: [String.t()]
-  def categories(%__MODULE__{context: %{discovery: %{"supported_categories" => categories}}})
-      when is_list(categories) and categories != [],
-      do: categories
+  def categories(%__MODULE__{
+        context: %{discovery: %{"supported_categories" => listed}} = context
+      })
+      when is_list(listed) and listed != [] do
+    # v1 lists slugs; v2 describes each category (v2 §19.3).
+    case Enum.map(listed, &category_id/1) |> Enum.filter(&is_binary/1) do
+      [] -> [context.primary_category]
+      categories -> categories
+    end
+  end
 
   def categories(%__MODULE__{context: context}), do: [context.primary_category]
+
+  defp category_id(%{"id" => id}), do: id
+  defp category_id(slug), do: slug
 
   @doc """
   Runs `operation` and returns its result with the HTTP exchanges it made,
@@ -118,22 +140,27 @@ defmodule HcpConformance.Vault do
   """
   @spec issue_grant(t(), assistant(), map()) :: {:ok, map()} | {:error, String.t()}
   def issue_grant(%__MODULE__{context: context}, %{id: id, name: name}, attrs) do
-    scopes =
-      for category <- attrs.categories, action <- attrs.actions, do: "hcp:#{category}:#{action}"
-
     opts =
       [
-        scopes: scopes,
         grant_type: attrs.grant_type,
         expires_in: attrs[:expires_in] || 3600,
         client_id: "#{id}-#{context.nonce}",
         client_name: name
-      ]
-      |> with_restrictions(scopes, attrs[:restrict_to])
+      ] ++ authority(context, attrs)
 
     Context.issue_grant(context, opts)
   rescue
     error in [HTTP.TransportError, HcpConformance.Skip] -> {:error, Exception.message(error)}
+  end
+
+  # What the grant authorizes, as the version's hook takes it.
+  defp authority(%Context{spec_version: "2.0"}, attrs), do: [access: V2.access(attrs)]
+
+  defp authority(_context, attrs) do
+    scopes =
+      for category <- attrs.categories, action <- attrs.actions, do: "hcp:#{category}:#{action}"
+
+    with_restrictions([scopes: scopes], scopes, attrs[:restrict_to])
   end
 
   defp with_restrictions(opts, _scopes, ids) when ids in [nil, []], do: opts
@@ -149,18 +176,55 @@ defmodule HcpConformance.Vault do
 
   @doc "Every grant the person has issued, whatever its status (§4.1.5)."
   @spec grants(t()) :: {:ok, [map()]} | {:error, refusal()}
-  def grants(%__MODULE__{context: context}) do
+  def grants(%__MODULE__{context: %Context{spec_version: "2.0"} = context}) do
+    # v2 lists one status at a time (§9.4.6); the page shows them all, oldest first.
+    Enum.reduce_while(V2.statuses(), {:ok, []}, fn status, {:ok, grants} ->
+      case grants_with(context, status) do
+        {:ok, more} -> {:cont, {:ok, Enum.sort_by(grants ++ more, & &1["issuedAt"])}}
+        {:error, refusal} -> {:halt, {:error, refusal}}
+      end
+    end)
+  end
+
+  def grants(%__MODULE__{context: context}), do: grants_with(context, "all")
+
+  defp grants_with(context, status) do
     context
-    |> as_person(:get, Context.url(context, :grants), params: [status: "all"])
-    |> expect(200, fn %{"grants" => grants} -> grants end)
+    |> as_person(:get, Context.url(context, :grants), params: [status: status])
+    |> expect(200, &Target.grants/1)
   end
 
   @doc "The person revokes a grant; the assistant's next request is refused."
   @spec revoke(t(), String.t()) :: :ok | {:error, refusal()}
   def revoke(%__MODULE__{context: context}, grant_id) do
-    response = as_person(context, :delete, Context.grant_url(context, grant_id))
-    with {:ok, _body} <- expect(response, 200, & &1), do: :ok
+    case as_person(context, :delete, Context.grant_url(context, grant_id)) do
+      # v2 answers with no body (§9.4.6); v1 with the grant.
+      %{status: 204} -> :ok
+      response -> with {:ok, _body} <- expect(response, 200, & &1), do: :ok
+    end
   end
+
+  @doc """
+  The person confirms or rejects a memory (v2 §3.8): `disposition` is
+  `"confirmed"` or `"rejected"`. A rejected memory is deleted. Returns the
+  memory as it now stands. v1 has no such act.
+  """
+  @spec confirm(t(), map(), String.t()) :: {:ok, map()} | {:error, refusal()}
+  def confirm(%__MODULE__{context: %Context{spec_version: "2.0"} = context}, entry, disposition) do
+    body = %{
+      "disposition" => disposition,
+      "expectedVersion" => get_in(entry, ["record", "version"])
+    }
+
+    context
+    |> as_person(:post, Context.entry_url(context, entry["id"]) <> "/confirmation", json: body)
+    |> expect(200, & &1)
+  rescue
+    error in HTTP.TransportError -> {:error, transport(error)}
+  end
+
+  def confirm(_vault, _entry, _disposition),
+    do: {:error, %{status: nil, type: "not-supported", detail: "HCP v1 has no confirmation"}}
 
   @doc "Every memory in the vault with its status, through the person's export (§4.3.5)."
   @spec entries(t()) :: {:ok, [map()]} | {:error, refusal()}
@@ -208,17 +272,15 @@ defmodule HcpConformance.Vault do
   """
   @spec remember(t(), author(), map()) :: {:ok, map()} | {:error, refusal()}
   def remember(%__MODULE__{context: context}, author, attrs) do
-    body =
-      Fixtures.entry_body(context,
-        preference: attrs.text,
-        category: attrs.category,
-        dimension: blank_to_nil(attrs[:dimension]),
-        declaration_type: attrs[:declaration_type] || "user-declared",
-        confidence: blank_to_nil(attrs[:confidence])
-      )
+    attrs =
+      attrs
+      |> Map.put(:dimension, blank_to_nil(attrs[:dimension]))
+      |> Map.put(:confidence, blank_to_nil(attrs[:confidence]))
+
+    {endpoint, body} = write(context, author, attrs)
 
     context
-    |> Context.request(:post, Context.url(context, :preferences),
+    |> Context.request(:post, Context.url(context, endpoint),
       token: token(context, author),
       json: body
     )
@@ -227,30 +289,58 @@ defmodule HcpConformance.Vault do
     error in HTTP.TransportError -> {:error, transport(error)}
   end
 
+  defp write(%Context{spec_version: "2.0"} = context, author, attrs),
+    do: {:entries, V2.entry_body(context, author, attrs)}
+
+  defp write(context, _author, attrs) do
+    body =
+      Fixtures.entry_body(context,
+        preference: attrs.text,
+        category: attrs.category,
+        dimension: attrs.dimension,
+        declaration_type: attrs[:declaration_type] || "user-declared",
+        confidence: attrs.confidence
+      )
+
+    {:preferences, body}
+  end
+
   # The assistant's side ---------------------------------------------------------------
 
   @doc """
   The memories `query` touches, read with an assistant's `grant` (its token and
   scopes). The vault decides what the grant may see. `opts`: `categories`
   (default: those the grant can read; others are refused), `max_entries` (5),
-  `detail` (`"full"` or `"minimal"`) and `purpose`.
+  `detail` (`"full"` or `"minimal"`, v1 only) and `purpose`, the person's words
+  for why. A v2 vault answers with disclosures, and is asked under the purpose
+  code the grant approved, with those words as its description.
   """
   @spec recall(t(), grant(), String.t(), keyword()) ::
           {:ok, [map()]} | {:error, refusal()}
   def recall(%__MODULE__{context: context}, %{token: token, scopes: _} = grant, query, opts \\ []) do
+    categories = opts[:categories] || readable(grant)
+    {endpoint, body} = search(context, query, categories, opts)
+
+    context
+    |> Context.request(:post, Context.url(context, endpoint), token: token, json: body)
+    |> expect(200, fn %{"entries" => entries} -> entries end)
+  rescue
+    error in HTTP.TransportError -> {:error, transport(error)}
+  end
+
+  defp search(%Context{spec_version: "2.0"}, query, categories, opts),
+    do: {:query, V2.query_body(query, categories, opts)}
+
+  defp search(_context, query, categories, opts) do
     body = %{
-      "categories" => opts[:categories] || readable(grant),
+      "categories" => categories,
       "purpose" => opts[:purpose] || @default_purpose,
       "query" => query,
       "maxEntries" => opts[:max_entries] || 5,
       "responseDetail" => opts[:detail] || "full"
     }
 
-    context
-    |> Context.request(:post, Context.url(context, :search), token: token, json: body)
-    |> expect(200, fn %{"entries" => entries} -> entries end)
-  rescue
-    error in HTTP.TransportError -> {:error, transport(error)}
+    {:search, body}
   end
 
   @doc "The categories a grant's scopes let it read."
@@ -288,31 +378,77 @@ defmodule HcpConformance.Vault do
     """
   end
 
-  # Reading an entry, in either envelope form (§2.2.1) ------------------------------------
+  # Reading a grant, in either version's shape --------------------------------------------
+
+  @doc "The ids of the memories a grant's reads are narrowed to; none when it reads whole categories."
+  @spec narrowed_to(map()) :: [String.t()]
+  def narrowed_to(grant) do
+    # v1 keeps narrowing in `restrictions`, v2 in each detail of `access`.
+    (List.wrap(grant["restrictions"]) ++ List.wrap(grant["access"]))
+    |> Enum.flat_map(&(get_in(&1, ["narrowedTo", "entryIds"]) || []))
+    |> Enum.uniq()
+  end
+
+  @doc "The purposes the person approved for a v2 grant, as described to them; none for v1."
+  @spec purposes(map()) :: [String.t()]
+  def purposes(grant) do
+    for %{"purposes" => purposes} <- List.wrap(grant["access"]),
+        %{"description" => description} <- purposes,
+        uniq: true,
+        do: description
+  end
+
+  # Reading a memory: a v1 entry in either envelope form (§2.2.1), a v2 entry
+  # (v2 §4.2), or the disclosure of one a v2 vault gives an assistant (v2 §7.4).
 
   @doc "A memory's statement."
   @spec preference(map()) :: String.t()
+  def preference(%{"content" => content}), do: text(content["value"])
   def preference(entry), do: entry |> field(["claim", "subject", "preference"]) |> text()
 
-  @doc "A memory's category."
+  @doc "A memory's category, or its categories where a v2 entry sits in several."
   @spec category(map()) :: String.t() | nil
+  def category(%{"classification" => %{"categories" => categories}}),
+    do: Enum.join(categories, ", ")
+
   def category(entry), do: field(entry, ["record", "category"])
 
   @doc "A memory's dimension, if any."
   @spec dimension(map()) :: String.t() | nil
+  def dimension(%{"classification" => classification}), do: classification["dimension"]
   def dimension(entry), do: field(entry, ["record", "dimension"])
 
-  @doc "How a memory was declared: user-declared, model-inferred or issuer-attested."
+  @doc "How a memory was declared: by the person, inferred by a model, or attested by an issuer."
   @spec declaration(map()) :: String.t() | nil
+  def declaration(%{"assertion" => assertion}), do: assertion["declarationType"]
   def declaration(entry), do: field(entry, ["record", "declarationType"])
 
   @doc "A model-inferred memory's confidence."
   @spec confidence(map()) :: String.t() | nil
+  def confidence(%{"assertion" => assertion}), do: assertion["confidence"]
   def confidence(entry), do: field(entry, ["record", "confidence"])
 
-  @doc "A memory's status: active, conflicted or deleted (§2.6)."
+  @doc "A memory's status: active, conflicted or deleted. A disclosure carries none."
   @spec status(map()) :: String.t() | nil
   def status(entry), do: field(entry, ["record", "status"])
+
+  @doc """
+  How a v2 vault established who asserted a memory (v2 §3.6): `unverified` when
+  an assistant says the person said it, `authenticated` when the person wrote it
+  themselves. Nil for a v1 entry.
+  """
+  @spec assurance(map()) :: String.t() | nil
+  def assurance(%{"standing" => %{"assurance" => assurance}}), do: assurance
+  def assurance(entry), do: get_in(entry, ["record", "provenance", "assertedBy", "assurance"])
+
+  @doc "Whether the person has confirmed this version of a v2 memory (v2 §3.8)."
+  @spec confirmed?(map()) :: boolean()
+  def confirmed?(%{"standing" => %{"confirmed" => confirmed}}), do: confirmed == true
+
+  def confirmed?(entry) do
+    confirmations = get_in(entry, ["record", "provenance", "confirmations"])
+    match?(%{"disposition" => "confirmed"}, List.last(List.wrap(confirmations)))
+  end
 
   defp field(entry, [group | rest] = path) do
     case get_in(entry, path) do

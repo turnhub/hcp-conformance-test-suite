@@ -19,6 +19,11 @@ defmodule HcpConformanceWeb.ChatLive do
   - The audit log and every HCP call the page made (request and response,
     credentials redacted) are on the page.
 
+  It speaks the version the vault does. Against HCP v2 a grant shows the purpose
+  the person approved, an assistant receives disclosures with a use-until time,
+  and in place of quarantine the person confirms or rejects what an assistant
+  wrote: it is recorded as unverified until they do (v2 §3.7, §3.8).
+
   Stateless like the run page: keys live in the encrypted session cookie, the
   conversation and grant tokens in this process, and OpenAI and Anthropic are
   asked not to store anything.
@@ -26,21 +31,13 @@ defmodule HcpConformanceWeb.ChatLive do
 
   use HcpConformanceWeb, :live_view
 
-  alias HcpConformance.{Assistants, Runs, Vault}
+  alias HcpConformance.{Assistants, Runs, Spec, Vault}
   alias HcpConformanceWeb.{Exchanges, Markdown}
 
   @max_calls 25
   @max_audit 60
 
   @impl true
-  def mount(_params, %{"connection" => %{"spec_version" => "2.0"}}, socket) do
-    # The vault client speaks HCP v1; a v2 target has the conformance run only.
-    {:ok,
-     socket
-     |> put_flash(:info, "The chat page works with HCP v1 targets. A v2 target has the run.")
-     |> redirect(to: ~p"/run")}
-  end
-
   def mount(_params, %{"connection" => connection} = session, socket) when is_map(connection) do
     case Runs.config(connection) do
       {:ok, config} ->
@@ -50,6 +47,7 @@ defmodule HcpConformanceWeb.ChatLive do
            page_title: "Chat",
            target: connection["target"],
            keys: session["assistants"] || %{},
+           version: config.spec_version || Spec.default(),
            vault: nil,
            vault_error: nil,
            categories: [],
@@ -63,7 +61,7 @@ defmodule HcpConformanceWeb.ChatLive do
            messages: [],
            replying: false,
            grant_form: grant_form(),
-           memory_form: memory_form(),
+           memory_form: memory_form(%{}, config.spec_version || Spec.default()),
            chat_form: chat_form(nil, true)
          )
          |> connect_vault(config)}
@@ -94,7 +92,7 @@ defmodule HcpConformanceWeb.ChatLive do
         </:subtitle>
       </.header>
 
-      <.vault_status target={@target} vault={@vault} error={@vault_error} />
+      <.vault_status target={@target} vault={@vault} version={@version} error={@vault_error} />
 
       <.keys_card keys={@keys} />
       <.grants_card
@@ -108,6 +106,7 @@ defmodule HcpConformanceWeb.ChatLive do
       />
       <.memories_card
         :if={@vault}
+        version={@version}
         form={@memory_form}
         categories={@categories}
         entries={@entries}
@@ -115,6 +114,7 @@ defmodule HcpConformanceWeb.ChatLive do
       />
       <.chat_card
         :if={@vault && @keys != %{}}
+        version={@version}
         form={@chat_form}
         keys={@keys}
         held={@held}
@@ -145,6 +145,7 @@ defmodule HcpConformanceWeb.ChatLive do
 
   attr :target, :string, required: true
   attr :vault, :any, required: true
+  attr :version, :string, required: true
   attr :error, :string, required: true
 
   defp vault_status(assigns) do
@@ -156,8 +157,9 @@ defmodule HcpConformanceWeb.ChatLive do
       </div>
       <div :if={@vault} class="alert alert-success">
         <span>
-          Connected as the person to <span class="break-all">{@target}</span>. Assistants
-          see nothing until you grant them access.
+          Connected as the person to <span class="break-all">{@target}</span>, which speaks {Spec.label(
+            @version
+          )}. Assistants see nothing until you grant them access.
         </span>
       </div>
     </div>
@@ -269,6 +271,7 @@ defmodule HcpConformanceWeb.ChatLive do
                   <span :for={scope <- grant["scopes"] || []} class="badge badge-ghost badge-sm">
                     {scope}
                   </span>
+                  <div :for={purpose <- Vault.purposes(grant)}>for: {purpose}</div>
                   <div :if={restricted(grant) > 0}>
                     narrowed to {restricted(grant)} {plural(restricted(grant), "memory", "memories")}
                   </div>
@@ -301,6 +304,7 @@ defmodule HcpConformanceWeb.ChatLive do
     """
   end
 
+  attr :version, :string, required: true
   attr :form, Phoenix.HTML.Form, required: true
   attr :categories, :list, required: true
   attr :entries, :list, required: true
@@ -311,10 +315,17 @@ defmodule HcpConformanceWeb.ChatLive do
     <div class="card bg-base-200">
       <div class="card-body">
         <h2 class="card-title">Memories</h2>
-        <p>
+        <p :if={@version != "2.0"}>
           The person's memories, whoever wrote them. An assistant writes only with a grant that
           includes write; an inference that contradicts something the person declared, on the
           same dimension, is quarantined as conflicted.
+        </p>
+        <p :if={@version == "2.0"}>
+          The person's memories, whoever wrote them. An assistant writes only with a grant that
+          includes write. What the person writes here is recorded as authenticated; what an
+          assistant says the person said is unverified until the person confirms it, and deleted
+          if they reject it. A vault takes inferences only if it claims the Memory Manager
+          Profile.
         </p>
 
         <.form for={@form} id="memory-form" phx-submit="remember" class="space-y-2">
@@ -339,7 +350,7 @@ defmodule HcpConformanceWeb.ChatLive do
             type="select"
             label="Declared as"
             options={[
-              {"user-declared: the person said it", "user-declared"},
+              {"#{declared(@version)}: the person said it", declared(@version)},
               {"model-inferred: an assistant inferred it", "model-inferred"},
               {"issuer-attested: a third party attests it", "issuer-attested"}
             ]}
@@ -368,6 +379,23 @@ defmodule HcpConformanceWeb.ChatLive do
               <span class={["badge badge-sm", entry_status_class(Vault.status(entry))]}>
                 {Vault.status(entry)}
               </span>
+              <span :if={Vault.assurance(entry)} class="badge badge-ghost badge-sm">
+                {Vault.assurance(entry)}
+              </span>
+              <span :if={Vault.confirmed?(entry)} class="badge badge-success badge-sm">
+                confirmed by the person
+              </span>
+            </div>
+            <div :if={confirmable?(entry)}>
+              <.button
+                :for={{label, disposition} <- [{"Confirm", "confirmed"}, {"Reject", "rejected"}]}
+                phx-click="confirm"
+                phx-value-entry={entry["id"]}
+                phx-value-disposition={disposition}
+                disabled={@busy}
+              >
+                {label}
+              </.button>
             </div>
           </li>
         </ul>
@@ -465,6 +493,7 @@ defmodule HcpConformanceWeb.ChatLive do
     """
   end
 
+  attr :version, :string, required: true
   attr :form, Phoenix.HTML.Form, required: true
   attr :keys, :map, required: true
   attr :held, :map, required: true
@@ -551,6 +580,7 @@ defmodule HcpConformanceWeb.ChatLive do
                 max="20"
               />
               <.input
+                :if={@version != "2.0"}
                 field={@form[:detail]}
                 type="select"
                 label="Response detail"
@@ -705,6 +735,9 @@ defmodule HcpConformanceWeb.ChatLive do
         <div :for={entry <- @result} class="flex flex-wrap items-center gap-1">
           <span>{Vault.preference(entry)}</span>
           <span class="badge badge-sm badge-ghost">{Vault.category(entry)}</span>
+          <span :if={entry["useUntil"]} class="badge badge-sm badge-ghost">
+            usable until {time(entry["useUntil"])}
+          </span>
         </div>
       </div>
     </li>
@@ -809,12 +842,30 @@ defmodule HcpConformanceWeb.ChatLive do
 
       {:noreply,
        socket
-       |> assign(memory_form: memory_form(Map.put(params, "text", "")))
+       |> assign(memory_form: memory_form(Map.put(params, "text", ""), socket.assigns.version))
        |> vault_op(:remember, "#{who} saved a memory", [:entries, :audit], fn ->
          Vault.remember(vault, author, attrs)
        end)}
     else
       {:error, message} -> {:noreply, put_flash(socket, :error, message)}
+    end
+  end
+
+  def handle_event("confirm", %{"entry" => id, "disposition" => disposition}, socket)
+      when disposition in ["confirmed", "rejected"] do
+    vault = socket.assigns.vault
+
+    case Enum.find(socket.assigns.entries, &(&1["id"] == id)) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "That memory is no longer in the vault.")}
+
+      entry ->
+        label = "The person #{disposition} a memory"
+
+        {:noreply,
+         vault_op(socket, :confirm, label, [:entries, :audit], fn ->
+           Vault.confirm(vault, entry, disposition)
+         end)}
     end
   end
 
@@ -854,7 +905,15 @@ defmodule HcpConformanceWeb.ChatLive do
   @impl true
   def handle_async(:connect, {:ok, {:ok, vault}}, socket) do
     Vault.link(vault)
-    {:noreply, assign(socket, vault: vault, categories: Vault.categories(vault))}
+    version = Vault.version(vault)
+
+    {:noreply,
+     assign(socket,
+       vault: vault,
+       version: version,
+       categories: Vault.categories(vault),
+       memory_form: memory_form(%{}, version)
+     )}
   end
 
   def handle_async(:connect, {:ok, {:error, message}}, socket),
@@ -1142,13 +1201,13 @@ defmodule HcpConformanceWeb.ChatLive do
     )
   end
 
-  defp memory_form(params \\ %{}) do
+  defp memory_form(params, version) do
     defaults = %{
       "text" => "",
       "category" => "general_preferences",
       "dimension" => "",
       "author" => "person",
-      "declaration_type" => "user-declared",
+      "declaration_type" => declared(version),
       "confidence" => ""
     }
 
@@ -1195,37 +1254,71 @@ defmodule HcpConformanceWeb.ChatLive do
   defp entry_status_class("conflicted"), do: "badge-warning"
   defp entry_status_class(_status), do: "badge-ghost"
 
-  defp restricted(grant) do
-    grant
-    |> Map.get("restrictions", [])
-    |> Enum.flat_map(&(get_in(&1, ["narrowedTo", "entryIds"]) || []))
-    |> Enum.uniq()
-    |> length()
+  defp restricted(grant), do: grant |> Vault.narrowed_to() |> length()
+
+  # What a statement of the person's own is called: v2 renamed v1's user-declared.
+  defp declared("2.0"), do: "person-declared"
+  defp declared(_v1), do: "user-declared"
+
+  # A v2 memory the person can still confirm or reject (v2 §3.8): active, not
+  # written by them, and not confirmed already.
+  defp confirmable?(entry) do
+    Vault.status(entry) == "active" and Vault.assurance(entry) == "unverified" and
+      not Vault.confirmed?(entry)
   end
 
+  # Who made an event: v1 names an actor, v2 the initiator among its participants (v2 §3.9).
   defp actor(%{"actorType" => "user"}), do: "the person"
   defp actor(%{"actorType" => "system"}), do: "the vault"
+  defp actor(%{"actorId" => id}) when is_binary(id), do: assistant_name(id)
 
-  defp actor(%{"actorId" => id}) when is_binary(id) do
+  defp actor(%{"participants" => %{"initiator" => %{"role" => role} = initiator}}) do
+    case role do
+      "management-client" -> "the person"
+      "authorization-service" -> "the vault's authorization service"
+      "hcp-provider" -> "the vault"
+      _context_client -> assistant_name(initiator["id"] || "")
+    end
+  end
+
+  defp actor(_event), do: ""
+
+  # A client's id starts with its assistant's (`HcpConformance.Vault.issue_grant/3`).
+  defp assistant_name(id) do
     case Enum.find(Assistants.all(), &String.starts_with?(id, &1.id <> "-")) do
       nil -> id
       assistant -> assistant.name
     end
   end
 
-  defp actor(_event), do: ""
-
   defp event_details(event) do
     [
-      event["category"] && "category #{event["category"]}",
-      event["purpose"] && "purpose: #{event["purpose"]}",
+      event_categories(event),
+      event_purpose(event),
       event["grantId"] && "grant #{short(event["grantId"])}",
       event["entryId"] && "entry #{short(event["entryId"])}",
-      event["detail"]
+      event["disclosed"] && "#{length(event["disclosed"])} disclosed",
+      event["detail"],
+      get_in(event, ["data", "disposition"])
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join(" · ")
   end
+
+  defp event_categories(%{"categories" => [_ | _] = categories}),
+    do: "#{plural(length(categories), "category", "categories")} #{Enum.join(categories, ", ")}"
+
+  defp event_categories(%{"category" => category}) when is_binary(category),
+    do: "category #{category}"
+
+  defp event_categories(_event), do: nil
+
+  # v2 records the approved purpose code and, beside it, the words given for the task.
+  defp event_purpose(%{"purposeDescription" => words}) when is_binary(words),
+    do: "purpose: #{words}"
+
+  defp event_purpose(%{"purpose" => purpose}) when is_binary(purpose), do: "purpose: #{purpose}"
+  defp event_purpose(_event), do: nil
 
   defp short("urn:uuid:" <> uuid), do: String.slice(uuid, 0, 8)
   defp short(id) when is_binary(id), do: String.slice(id, 0, 12)
