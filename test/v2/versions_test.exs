@@ -109,7 +109,7 @@ defmodule HcpConformance.V2.VersionsTest do
     end
   end
 
-  test "docs/CHECKS-v2.md matches the catalogue (regenerate with mix hcp.checks --spec-version 2.0 > docs/CHECKS-v2.md)" do
+  test "docs/CHECKS-v2.md matches the catalogue (regenerate with mix hcp.checks --write)" do
     assert File.read!("docs/CHECKS-v2.md") == CLI.catalogue("2.0")
   end
 end

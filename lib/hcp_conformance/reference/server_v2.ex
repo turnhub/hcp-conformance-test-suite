@@ -9,25 +9,30 @@ defmodule HcpConformance.Reference.ServerV2 do
 
   It claims the First-Party package with both bindings: Core, the HTTP Binding,
   the MCP Binding over Streamable HTTP (`HcpConformance.Reference.McpV2`), the
-  General Context Profile and the First-Party Authorization Profile. It does not
-  claim the Memory Manager Profile, so it refuses `model-inferred` entries, nor
-  the VC Evidence Profile, so it refuses credentials as content. Not
-  implemented, and not yet checked by the suite: import, the disclosure summary,
-  relationships between entries, revocation notifications, and the `notTo` a
-  standing rule adds to an onward-sharing election.
+  General Context Profile and the First-Party Authorization Profile. It also
+  claims the Memory Manager Profile, so it accepts `model-inferred` entries and
+  finds conflicts itself (`HcpConformance.Reference.ConflictsV2`). It does not
+  claim the VC Evidence Profile, so it refuses credentials as content and
+  `issuer-attested` entries. Not implemented, and not yet checked by the suite:
+  import, the disclosure summary, relationships in a disclosure, revocation
+  notifications, and the `notTo` a standing rule adds to an onward-sharing
+  election.
 
   The person's token is the Management Client acting for the Authorizing
   Principal; a grant's token is a Context Client. Options are those of the v1
   reference server, and `bindings` (both by default): `["mcp"]` makes it the
   MCP-only provider the First-Party package permits, with no HTTP Binding and
-  so no governance plane to reach.
+  so no governance plane to reach. `memory_manager: false` makes it a provider
+  that does not claim that profile and refuses inferences, and `detects: false`
+  one whose method finds no conflict; neither is a defect, and the tests use
+  them to prove the suite treats such providers properly.
   """
 
   @behaviour Plug
 
   import Plug.Conn
 
-  alias HcpConformance.Reference.{McpV2, ModelV2, Store}
+  alias HcpConformance.Reference.{ConflictsV2, McpV2, ModelV2, Store}
 
   @version "2.0"
   @problem_base "https://hcp.example/problems/"
@@ -36,7 +41,8 @@ defmodule HcpConformance.Reference.ServerV2 do
                   https://hcp.example/spec/bindings/http/2.0
                   https://hcp.example/spec/bindings/mcp/2.0
                   https://hcp.example/spec/profiles/general-context/2.0
-                  https://hcp.example/spec/profiles/first-party-authorization/2.0)
+                  https://hcp.example/spec/profiles/first-party-authorization/2.0
+                  https://hcp.example/spec/profiles/memory-manager/2.0)
   @problems %{
     "invalid-token" => {401, "Missing or invalid authorization"},
     "scope-denied" => {403, "Outside the caller's grant"},
@@ -53,7 +59,9 @@ defmodule HcpConformance.Reference.ServerV2 do
              count_leak no_idempotency stale_confirmation hard_delete_keeps revocation_ignored
              governance_open rule_ignored no_directives plain_cursor share_unrecorded
              mcp_missing_tool mcp_governance_tool mcp_text_only mcp_no_challenge
-             mcp_existence_challenge mcp_token_echo)a
+             mcp_existence_challenge mcp_token_echo no_quarantine asymmetric_relationship
+             conflict_unaudited apply_proposal dimension_alone no_reevaluation
+             reactivate_on_withdrawal leak_conflicted)a
 
   @doc "The fault switches the server understands."
   @spec faults() :: [atom()]
@@ -66,6 +74,8 @@ defmodule HcpConformance.Reference.ServerV2 do
       hook_secret: Keyword.get(opts, :hook_secret, "reference-hook-secret"),
       base_url: Keyword.get(opts, :base_url),
       bindings: Keyword.get(opts, :bindings, ["http", "mcp"]),
+      memory_manager: Keyword.get(opts, :memory_manager, true),
+      detects: Keyword.get(opts, :detects, true),
       faults: MapSet.new(Keyword.get(opts, :faults, []))
     }
   end
@@ -86,6 +96,8 @@ defmodule HcpConformance.Reference.ServerV2 do
       now: DateTime.utc_now() |> DateTime.truncate(:second),
       faults: opts.faults,
       bindings: opts.bindings,
+      memory_manager: opts.memory_manager,
+      detects: opts.detects,
       hook_secret: opts.hook_secret
     }
 
@@ -263,12 +275,23 @@ defmodule HcpConformance.Reference.ServerV2 do
     ok(
       200,
       document
+      |> profiles(request)
       |> Map.merge(http_members(base, bindings))
       |> Map.merge(mcp_members(base, bindings))
     )
   end
 
   defp claims(bindings), do: Enum.filter(@conforms_to, &claimed?(&1, bindings))
+
+  # The accept_inferred fault takes inferences without claiming the profile
+  # that says how their conflicts are found (§18.1).
+  defp profiles(document, request) do
+    if fault?(request, :accept_inferred) or not request.memory_manager do
+      Map.update!(document, "conformsTo", &Enum.reject(&1, fn id -> id =~ "memory-manager" end))
+    else
+      Map.put(document, "conflict_detection", ConflictsV2.method())
+    end
+  end
 
   # A binding's identifier is claimed only where the binding is exposed (§19.3).
   defp claimed?(identifier, bindings) do
@@ -515,7 +538,8 @@ defmodule HcpConformance.Reference.ServerV2 do
   defp can_read?(_request, _subject, %{grant: nil}, _entry, _purpose), do: true
 
   defp can_read?(request, subject, actor, entry, purpose) do
-    entry["record"]["status"] == "active" and
+    (entry["record"]["status"] == "active" or
+       (fault?(request, :leak_conflicted) and entry["record"]["status"] == "conflicted")) and
       not ModelV2.lapsed?(entry, request.now) and
       reaches_for_read?(request, actor.grant, entry, purpose) and
       ModelV2.purpose_permitted?(entry, purpose) and
@@ -629,11 +653,10 @@ defmodule HcpConformance.Reference.ServerV2 do
 
   defp create(request, subject, actor) do
     idempotent(request, subject, "create", fn subject ->
-      opts = [subject: subject.did, accept_inferred: fault?(request, :accept_inferred)]
-
-      with :ok <- ModelV2.validate_create(request.json, opts),
-           true <- may_assign?(request, subject, actor, request.json) do
-        store(request, subject, actor, request.json)
+      with :ok <- ModelV2.validate_create(request.json, writes(request, subject)),
+           true <- may_assign?(request, subject, actor, request.json),
+           {:ok, relationships} <- relationships(request, subject, actor, request.json) do
+        store(request, subject, actor, request.json, relationships)
       else
         {:error, slug, detail} ->
           {problem(slug, detail), subject}
@@ -642,6 +665,13 @@ defmodule HcpConformance.Reference.ServerV2 do
           {problem("scope-denied", "The request falls outside the caller's grant"), subject}
       end
     end)
+  end
+
+  # What a write is validated against: the Context Subject, and whether this
+  # provider takes inferences at all (§18.1).
+  defp writes(request, subject) do
+    inferences? = request.memory_manager or fault?(request, :accept_inferred)
+    [subject: subject.did, inferences: inferences?]
   end
 
   # §4.5: a client assigns only categories its grant lets it write.
@@ -655,7 +685,60 @@ defmodule HcpConformance.Reference.ServerV2 do
       not ModelV2.denied?(denied_categories(request, subject, actor), categories)
   end
 
-  defp store(request, subject, actor, body) do
+  # §4.2.3: the relationships a write asserts, each to an entry in a category the
+  # caller may read; any other target is not authorized, whether or not it exists.
+  defp relationships(request, subject, actor, body) do
+    ConflictsV2.parse(get_in(body, ["record", "relationships"]), fn target ->
+      with {:ok, id} <- resolve(request, subject, actor, target),
+           true <- relatable?(actor, current(subject, id)) do
+        {:ok, id}
+      else
+        _unreachable -> :error
+      end
+    end)
+  end
+
+  defp relatable?(%{grant: nil}, _entry), do: true
+
+  defp relatable?(actor, entry),
+    do: Enum.any?(categories_of(entry), &(&1 in ModelV2.categories_for(actor.grant, "read")))
+
+  # Records the relationships a write asserted, then evaluates the entry for
+  # conflicts as the Memory Manager Profile requires on every write (§15.2).
+  defp relate(subject, request, actor, id, relationships) do
+    client = if actor.grant, do: actor.grant["client"], else: management_client(request)
+    asserter = %{"role" => actor.role, "id" => client["id"]}
+    now = iso(request.now)
+
+    {subject, events} =
+      Enum.reduce(relationships, {subject, []}, fn relationship, {subject, events} ->
+        {subject, more} =
+          ConflictsV2.link(subject, id, relationship, asserter, now, request.faults)
+
+        {subject, events ++ more}
+      end)
+
+    {subject, detected} =
+      if request.detects and request.memory_manager,
+        do: ConflictsV2.detect(subject, id, request.base, now, request.faults),
+        else: {subject, []}
+
+    log(subject, request, events ++ detected)
+  end
+
+  # §3.9: a conflict has no initiating client; the provider is named.
+  defp log(subject, request, events) do
+    Enum.reduce(events, subject, fn {type, entry, related, data}, subject ->
+      append(subject, request, type, :provider, %{
+        "entryId" => entry,
+        "relatedEntryId" => related,
+        "categories" => categories_of(current(subject, entry)),
+        "data" => data
+      })
+    end)
+  end
+
+  defp store(request, subject, actor, body, relationships) do
     id = urn_uuid()
 
     entry =
@@ -684,8 +767,9 @@ defmodule HcpConformance.Reference.ServerV2 do
         "categories" => categories_of(entry),
         "data" => %{"version" => 1}
       })
+      |> relate(request, actor, id, relationships)
 
-    {doc, subject} = present(subject, request, actor, entry)
+    {doc, subject} = present(subject, request, actor, current(subject, id))
     {ok(201, doc), subject}
   end
 
@@ -1011,12 +1095,10 @@ defmodule HcpConformance.Reference.ServerV2 do
       with {:ok, id} <- resolve(request, subject, actor, segment),
            entry = current(subject, id),
            true <- can_write?(request, subject, actor, entry),
-           :ok <-
-             ModelV2.validate_revision(body, entry,
-               accept_inferred: fault?(request, :accept_inferred)
-             ),
-           true <- body["expectedVersion"] == entry["record"]["version"] || :stale do
-        save_revision(request, subject, actor, entry, body)
+           :ok <- ModelV2.validate_revision(body, entry, writes(request, subject)),
+           true <- body["expectedVersion"] == entry["record"]["version"] || :stale,
+           {:ok, relationships} <- relationships(request, subject, actor, body) do
+        save_revision(request, subject, actor, entry, body, relationships)
       else
         {:error, slug, detail} ->
           {problem(slug, detail), subject}
@@ -1030,7 +1112,7 @@ defmodule HcpConformance.Reference.ServerV2 do
     end)
   end
 
-  defp save_revision(request, subject, actor, entry, body) do
+  defp save_revision(request, subject, actor, entry, body, relationships) do
     id = entry["id"]
     version = entry["record"]["version"] + 1
     kept = Map.take(entry["assertion"], ["declarationType"])
@@ -1045,7 +1127,10 @@ defmodule HcpConformance.Reference.ServerV2 do
         "content" => body["content"],
         "evidence" => body["evidence"] || [],
         "assertion" => assertion(merged["assertion"]),
-        "record" => record(request, subject, actor, merged, version)
+        "record" =>
+          request
+          |> record(subject, actor, merged, version)
+          |> Map.put("status", revised_status(entry["record"]["status"]))
       })
 
     subject =
@@ -1056,9 +1141,19 @@ defmodule HcpConformance.Reference.ServerV2 do
         "data" => %{"version" => version, "reason" => body["reason"]}
       })
 
-    {doc, subject} = present(subject, request, actor, revised)
+    # §15.3: the entry's conflicts are evaluated anew against its new version.
+    {subject, events} =
+      ConflictsV2.revised(subject, id, Enum.map(relationships, & &1.target), request.faults)
+
+    subject = subject |> log(request, events) |> relate(request, actor, id, relationships)
+    {doc, subject} = present(subject, request, actor, current(subject, id))
     {ok(201, doc), subject}
   end
+
+  # §4.2.4: a revision brings a deprecated or expired entry back; a conflicted
+  # one stays held until its conflict no longer stands.
+  defp revised_status(status) when status in ["deprecated", "expired"], do: "active"
+  defp revised_status(status), do: status
 
   defp delete(request, subject, actor, segment) do
     hard? = request.query["hardDelete"] == "true"
@@ -1091,13 +1186,18 @@ defmodule HcpConformance.Reference.ServerV2 do
 
     subject =
       if hard? and not fault?(request, :hard_delete_keeps) do
-        %{
-          subject
-          | entries: Map.delete(subject.entries, id),
-            entry_order: subject.entry_order -- [id]
-        }
+        ConflictsV2.forget(
+          %{
+            subject
+            | entries: Map.delete(subject.entries, id),
+              entry_order: subject.entry_order -- [id]
+          },
+          id
+        )
       else
-        put_current(subject, id, put_in(entry, ["record", "status"], "deleted"))
+        subject = put_current(subject, id, put_in(entry, ["record", "status"], "deleted"))
+        {subject, events} = ConflictsV2.withdrawn(subject, id, request.faults)
+        log(subject, request, events)
       end
 
     subject =
@@ -1152,7 +1252,11 @@ defmodule HcpConformance.Reference.ServerV2 do
       if disposition in ["confirmed", "rejected"] do
         entry = confirmed(entry, disposition, subject.did, iso(request.now))
         data = %{"disposition" => disposition, "version" => entry["record"]["version"]}
-        changed(request, subject, actor, entry, "context.confirmed", data)
+        {_response, subject} = changed(request, subject, actor, entry, "context.confirmed", data)
+        # §4.7.3: the act resolves the conflicts the entry is in.
+        {subject, events} = ConflictsV2.confirmed(subject, entry["id"], disposition)
+        subject = log(subject, request, events)
+        {ok(200, current(subject, entry["id"])), subject}
       else
         {problem("malformed-request", "disposition must be confirmed or rejected"), subject}
       end
@@ -1538,6 +1642,7 @@ defmodule HcpConformance.Reference.ServerV2 do
       entries: %{},
       entry_order: [],
       refs: %{},
+      conflicts: [],
       grants: %{},
       grant_order: [],
       rules: [],

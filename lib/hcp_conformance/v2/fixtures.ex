@@ -24,8 +24,9 @@ defmodule HcpConformance.V2.Fixtures do
   @doc """
   The body of a create (§5.2.3). `opts`: `:value`, `:categories`, `:dimension`,
   `:declaration_type` ("person-declared"), `:confidence`, `:asserted_by`,
-  `:merge` (a map deep-merged over the body, for forged or extra members) and
-  `:drop` (paths to remove, for negative tests).
+  `:relationships` (each a type and a target, named as the caller names
+  entries), `:merge` (a map deep-merged over the body, for forged or extra
+  members) and `:drop` (paths to remove, for negative tests).
   """
   @spec entry_body(Context.t(), keyword()) :: map()
   def entry_body(ctx, opts \\ []) do
@@ -52,7 +53,7 @@ defmodule HcpConformance.V2.Fixtures do
       "classification" =>
         %{"categories" => Keyword.get(opts, :categories, [ctx.primary_category])}
         |> put_some("dimension", opts[:dimension]),
-      "record" => %{"provenance" => provenance}
+      "record" => put_some(%{"provenance" => provenance}, "relationships", opts[:relationships])
     }
 
     body = deep_merge(body, Keyword.get(opts, :merge, %{}))

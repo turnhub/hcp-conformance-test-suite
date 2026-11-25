@@ -21,8 +21,9 @@ defmodule HcpConformanceWeb.ChatLive do
 
   It speaks the version the vault does. Against HCP v2 a grant shows the purpose
   the person approved, an assistant receives disclosures with a use-until time,
-  and in place of quarantine the person confirms or rejects what an assistant
-  wrote: it is recorded as unverified until they do (v2 §3.7, §3.8).
+  and the person confirms or rejects what an assistant wrote: it is recorded as
+  unverified until they do (v2 §3.7, §3.8). An inference the vault finds to
+  contradict the person is quarantined until then (v2 §4.7, §15).
 
   Stateless like the run page: keys live in the encrypted session cookie, the
   conversation and grant tokens in this process, and OpenAI and Anthropic are
@@ -324,8 +325,9 @@ defmodule HcpConformanceWeb.ChatLive do
           The person's memories, whoever wrote them. An assistant writes only with a grant that
           includes write. What the person writes here is recorded as authenticated; what an
           assistant says the person said is unverified until the person confirms it, and deleted
-          if they reject it. A vault takes inferences only if it claims the Memory Manager
-          Profile.
+          if they reject it. A vault that takes inferences finds conflicts by a method of its
+          own: an inference that contradicts the person is quarantined as conflicted, withheld
+          from assistants, until the person confirms or rejects it.
         </p>
 
         <.form for={@form} id="memory-form" phx-submit="remember" class="space-y-2">
@@ -1260,10 +1262,11 @@ defmodule HcpConformanceWeb.ChatLive do
   defp declared("2.0"), do: "person-declared"
   defp declared(_v1), do: "user-declared"
 
-  # A v2 memory the person can still confirm or reject (v2 §3.8): active, not
-  # written by them, and not confirmed already.
+  # A v2 memory the person can still confirm or reject (v2 §3.8, §4.7.3): in
+  # use or quarantined in a conflict, not written by them, and not confirmed
+  # already.
   defp confirmable?(entry) do
-    Vault.status(entry) == "active" and Vault.assurance(entry) == "unverified" and
+    Vault.status(entry) in ["active", "conflicted"] and Vault.assurance(entry) == "unverified" and
       not Vault.confirmed?(entry)
   end
 

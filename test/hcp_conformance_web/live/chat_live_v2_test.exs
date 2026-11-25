@@ -228,21 +228,30 @@ defmodule HcpConformanceWeb.ChatLiveV2Test do
     refute has_element?(view, "#entries li button", "Reject")
   end
 
-  test "an inference is refused by a vault without the Memory Manager Profile, and the page says so",
+  test "an assistant's inference that contradicts the person is quarantined until the person decides",
        %{conn: conn} do
     view = ready(conn)
+    remember(view, %{text: "I am vegetarian.", dimension: "diet"})
     grant(view, "claude", %{write: "true"})
 
-    html =
-      remember(view, %{
-        text: "Loves steak.",
-        author: "claude",
-        declaration_type: "model-inferred",
-        confidence: "medium"
-      })
+    remember(view, %{
+      text: "I am not vegetarian.",
+      dimension: "diet",
+      author: "claude",
+      declaration_type: "model-inferred",
+      confidence: "medium"
+    })
 
-    assert html =~ "422 malformed-request"
-    assert html =~ "Memory Manager Profile"
-    refute has_element?(view, "#entries li", "Loves steak.")
+    assert has_element?(view, "#entries li:last-child", "conflicted")
+    assert has_element?(view, "#entries li:first-child", "active")
+    assert has_element?(view, "#audit", "conflict.detected")
+
+    # Accepting it is the person's act; the statement it contradicted is set aside.
+    click(view, "#entries li:last-child button", "Confirm")
+
+    assert has_element?(view, "#entries li:last-child", "active")
+    assert has_element?(view, "#entries li:last-child", "confirmed by the person")
+    assert has_element?(view, "#entries li:first-child", "deprecated")
+    assert has_element?(view, "#audit", "conflict.resolved")
   end
 end

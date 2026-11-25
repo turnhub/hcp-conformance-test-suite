@@ -69,7 +69,9 @@ defmodule HcpConformance.Reference.ModelV2 do
 
   @doc """
   Checks a create body. `{:error, slug, detail}` names the Core error; `opts`
-  carries `subject` (the Context Subject's id) and `accept_inferred` (a fault).
+  carries `subject` (the Context Subject's id) and `inferences` (whether the
+  provider takes `model-inferred` entries, which it does only where it claims
+  the Memory Manager Profile).
   """
   @spec validate_create(term(), keyword()) :: :ok | {:error, String.t(), String.t()}
   def validate_create(body, opts) when is_map(body) do
@@ -159,7 +161,7 @@ defmodule HcpConformance.Reference.ModelV2 do
       type != "model-inferred" and confidence != nil ->
         {:error, "malformed-request", "confidence is for model-inferred entries only"}
 
-      type == "model-inferred" and not Keyword.get(opts, :accept_inferred, false) ->
+      type == "model-inferred" and not Keyword.get(opts, :inferences, true) ->
         {:error, "malformed-request",
          "model-inferred entries are not accepted: the Memory Manager Profile is not claimed"}
 
@@ -191,10 +193,22 @@ defmodule HcpConformance.Reference.ModelV2 do
   defp categories_error(_body, _opts),
     do: {:error, "malformed-request", "classification.categories is required"}
 
+  # §5.2.3: the source always; the asserter unless the person is declared to be it.
   defp provenance_error(body, _opts) do
-    if is_binary(get_in(body, ["record", "provenance", "source"])),
-      do: nil,
-      else: {:error, "malformed-request", "record.provenance.source is required"}
+    provenance = get_in(body, ["record", "provenance"]) || %{}
+    declared? = get_in(body, ["assertion", "declarationType"]) == "person-declared"
+
+    cond do
+      not is_binary(provenance["source"]) ->
+        {:error, "malformed-request", "record.provenance.source is required"}
+
+      not declared? and not is_binary(get_in(provenance, ["assertedBy", "id"])) ->
+        {:error, "malformed-request",
+         "record.provenance.assertedBy.id names the asserter of an entry the person did not declare"}
+
+      true ->
+        nil
+    end
   end
 
   @doc "A categories list a governance change may set (§4.2.1)."

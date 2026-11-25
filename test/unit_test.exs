@@ -354,7 +354,7 @@ defmodule HcpConformance.UnitTest do
     end
   end
 
-  test "docs/CHECKS.md matches the catalogue (regenerate with mix hcp.checks > docs/CHECKS.md)" do
+  test "docs/CHECKS.md matches the catalogue (regenerate with mix hcp.checks --write)" do
     assert File.read!("docs/CHECKS.md") == HcpConformance.CLI.catalogue()
   end
 end

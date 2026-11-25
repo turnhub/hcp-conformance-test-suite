@@ -52,7 +52,21 @@ defmodule HcpConformance.V2.FaultDetectionTest do
      ~w(mcp.existence_hidden mcp.category_challenge mcp.purpose_challenge mcp.write_challenge),
      ~w(mcp.category_challenge mcp.purpose_challenge mcp.write_challenge)},
     {:mcp_existence_challenge, ~w(mcp.get_entry mcp.existence_hidden), ~w(mcp.existence_hidden)},
-    {:mcp_token_echo, ~w(mcp.query mcp.token_not_returned), ~w(mcp.token_not_returned)}
+    {:mcp_token_echo, ~w(mcp.query mcp.token_not_returned), ~w(mcp.token_not_returned)},
+    {:no_quarantine, ~w(conflicts.own_statements conflicts.quarantine conflicts.both_unverified),
+     ~w(conflicts.quarantine conflicts.both_unverified)},
+    {:asymmetric_relationship, ~w(conflicts.quarantine conflicts.symmetric),
+     ~w(conflicts.symmetric)},
+    {:conflict_unaudited, ~w(conflicts.quarantine conflicts.audited conflicts.own_statements),
+     ~w(conflicts.audited conflicts.own_statements)},
+    {:leak_conflicted, ~w(conflicts.quarantine conflicts.withheld), ~w(conflicts.withheld)},
+    {:apply_proposal, ~w(conflicts.proposal_followed conflicts.proposal), ~w(conflicts.proposal)},
+    {:dimension_alone, ~w(conflicts.quarantine conflicts.dimension_alone),
+     ~w(conflicts.dimension_alone)},
+    {:no_reevaluation, ~w(conflicts.detected conflicts.supersede conflicts.reevaluated),
+     ~w(conflicts.reevaluated)},
+    {:reactivate_on_withdrawal, ~w(conflicts.reject conflicts.authoritative_withdrawn),
+     ~w(conflicts.authoritative_withdrawn)}
   ]
 
   for {fault, only, failing} <- @cases do
