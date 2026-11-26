@@ -1,7 +1,8 @@
 defmodule HcpConformance.ReferenceTarget do
   @moduledoc """
   Starts a reference HCP server on a random local port, optionally with faults
-  switched on. `version: "2.0"` starts the v2 reference instead of the v1 one.
+  switched on. `version: "2.0"` starts the v2 reference instead of the v1 one,
+  and `bindings: ["mcp"]` has it expose that binding only.
   """
 
   # Test support only: it serves the reference for the suite's tests to run against.
@@ -15,7 +16,10 @@ defmodule HcpConformance.ReferenceTarget do
   def start!(opts \\ []) do
     {:ok, store} = Store.start_link()
     server = if opts[:version] == "2.0", do: ServerV2, else: Server
-    plug = {server, store: store, hook_secret: @secret, faults: Keyword.get(opts, :faults, [])}
+
+    plug =
+      {server, [store: store, hook_secret: @secret] ++ Keyword.take(opts, [:faults, :bindings])}
+
     {:ok, pid} = Bandit.start_link(plug: plug, port: 0, ip: :loopback, startup_log: false)
     {:ok, {_ip, port}} = ThousandIsland.listener_info(pid)
     base = "http://127.0.0.1:#{port}"

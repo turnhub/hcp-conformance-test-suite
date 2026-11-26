@@ -43,7 +43,10 @@ defmodule HcpConformance.V2.Target do
         audit: endpoint(discovery, "audit_endpoint", base <> "/v2/audit"),
         export: endpoint(discovery, "export_endpoint", base <> "/v2/export"),
         rules: endpoint(discovery, "rules_endpoint", base <> "/v2/rules"),
-        directives: endpoint(discovery, "directives_endpoint", base <> "/v2/directives")
+        directives: endpoint(discovery, "directives_endpoint", base <> "/v2/directives"),
+        shares: endpoint(discovery, "shares_endpoint", base <> "/v2/shares"),
+        # Published only where the MCP Binding runs over Streamable HTTP (§19.3).
+        mcp: endpoint(discovery, "mcp_endpoint", nil)
       }
     }
   end
@@ -70,8 +73,9 @@ defmodule HcpConformance.V2.Target do
 
   @doc """
   The body members that say what a grant authorizes. `opts`: `:access` (whole
-  details), or `:actions`, `:categories`, `:purposes` (codes) and `:narrowed_to`
-  for a single detail; `:operator` for a Client Operator other than the suite's.
+  details), or `:actions`, `:categories`, `:purposes` (codes), `:narrowed_to`
+  and `:onward_sharing` (the election, `%{}` for any organization) for a single
+  detail; `:operator` for a Client Operator other than the suite's.
   """
   @spec grant_attrs(Context.t(), keyword()) :: map()
   def grant_attrs(ctx, opts) do
@@ -83,16 +87,20 @@ defmodule HcpConformance.V2.Target do
           "purposes" => opts |> Keyword.get(:purposes, [@purpose]) |> Enum.map(&describe/1)
         }
 
-        case opts[:narrowed_to] do
-          nil -> [detail]
-          narrowed -> [Map.put(detail, "narrowedTo", narrowed)]
-        end
+        [
+          detail
+          |> put_some("narrowedTo", opts[:narrowed_to])
+          |> put_some("onwardSharing", opts[:onward_sharing])
+        ]
       end)
 
     %{"access" => access, "operator" => Keyword.get(opts, :operator, @operator)}
   end
 
   defp describe(code), do: %{"code" => code, "description" => "HCP conformance run"}
+
+  defp put_some(map, _key, nil), do: map
+  defp put_some(map, key, value), do: Map.put(map, key, value)
 
   @doc "Scope strings for the registered categories and read or write actions of `access` (§6.1.1)."
   @spec scopes([map()]) :: [String.t()]

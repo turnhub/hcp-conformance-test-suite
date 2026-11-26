@@ -1,35 +1,40 @@
 defmodule HcpConformance.Reference.ServerV2 do
   @moduledoc """
-  A small, in-memory HCP v2 (2.0-draft-3) implementation of the HTTP Binding,
-  with the conformance hook (docs/HOOK.md).
+  A small, in-memory HCP v2 (2.0-draft-3) implementation of the HTTP Binding and
+  the MCP Binding, with the conformance hook (docs/HOOK.md).
 
   It plays the part for v2 that `HcpConformance.Reference.Server` plays for v1:
   the suite's tests run every v2 check against it, as written and with
   deliberate faults, and a hosted suite can mount it.
 
-  It claims the First-Party package: Core, the HTTP Binding, the General Context
-  Profile and the First-Party Authorization Profile. It does not claim the Memory
-  Manager Profile, so it refuses `model-inferred` entries, nor the VC Evidence
-  Profile, so it refuses credentials as content. Not implemented, and not yet
-  checked by the suite: import, onward sharing, the disclosure summary,
-  relationships between entries, and revocation notifications.
+  It claims the First-Party package with both bindings: Core, the HTTP Binding,
+  the MCP Binding over Streamable HTTP (`HcpConformance.Reference.McpV2`), the
+  General Context Profile and the First-Party Authorization Profile. It does not
+  claim the Memory Manager Profile, so it refuses `model-inferred` entries, nor
+  the VC Evidence Profile, so it refuses credentials as content. Not
+  implemented, and not yet checked by the suite: import, the disclosure summary,
+  relationships between entries, revocation notifications, and the `notTo` a
+  standing rule adds to an onward-sharing election.
 
   The person's token is the Management Client acting for the Authorizing
   Principal; a grant's token is a Context Client. Options are those of the v1
-  reference server.
+  reference server, and `bindings` (both by default): `["mcp"]` makes it the
+  MCP-only provider the First-Party package permits, with no HTTP Binding and
+  so no governance plane to reach.
   """
 
   @behaviour Plug
 
   import Plug.Conn
 
-  alias HcpConformance.Reference.{ModelV2, Store}
+  alias HcpConformance.Reference.{McpV2, ModelV2, Store}
 
   @version "2.0"
   @problem_base "https://hcp.example/problems/"
   @context ["https://hcp.example/contexts/v2"]
   @conforms_to ~w(https://hcp.example/spec/core/2.0
                   https://hcp.example/spec/bindings/http/2.0
+                  https://hcp.example/spec/bindings/mcp/2.0
                   https://hcp.example/spec/profiles/general-context/2.0
                   https://hcp.example/spec/profiles/first-party-authorization/2.0)
   @problems %{
@@ -46,7 +51,9 @@ defmodule HcpConformance.Reference.ServerV2 do
   @faults ~w(omit_version_header ignore_version_header trust_provenance accept_inferred leak_id
              ref_shared long_use_until not_found_for_client no_purpose_check pad_results no_ceiling
              count_leak no_idempotency stale_confirmation hard_delete_keeps revocation_ignored
-             governance_open rule_ignored no_directives plain_cursor)a
+             governance_open rule_ignored no_directives plain_cursor share_unrecorded
+             mcp_missing_tool mcp_governance_tool mcp_text_only mcp_no_challenge
+             mcp_existence_challenge mcp_token_echo)a
 
   @doc "The fault switches the server understands."
   @spec faults() :: [atom()]
@@ -58,6 +65,7 @@ defmodule HcpConformance.Reference.ServerV2 do
       store: Keyword.fetch!(opts, :store),
       hook_secret: Keyword.get(opts, :hook_secret, "reference-hook-secret"),
       base_url: Keyword.get(opts, :base_url),
+      bindings: Keyword.get(opts, :bindings, ["http", "mcp"]),
       faults: MapSet.new(Keyword.get(opts, :faults, []))
     }
   end
@@ -77,6 +85,7 @@ defmodule HcpConformance.Reference.ServerV2 do
       base: opts.base_url || base_url(conn),
       now: DateTime.utc_now() |> DateTime.truncate(:second),
       faults: opts.faults,
+      bindings: opts.bindings,
       hook_secret: opts.hook_secret
     }
 
@@ -175,10 +184,20 @@ defmodule HcpConformance.Reference.ServerV2 do
   defp dispatch(%{method: "GET", path: [".well-known", "hcp-configuration"]} = request, _store),
     do: discovery(request)
 
+  # RFC 9728: where MCP's authorization looks for the resource's metadata. A
+  # First-Party provider has no OAuth authorization server to name in it.
+  defp dispatch(%{method: "GET", path: [".well-known", "oauth-protected-resource"]} = request, _),
+    do:
+      {200, %{"resource" => request.base, "bearer_methods_supported" => ["header"]},
+       "application/json", []}
+
+  defp dispatch(%{method: "POST", path: ["mcp"]} = request, store),
+    do: if("mcp" in request.bindings, do: mcp(request, store), else: not_found("No such route"))
+
   defp dispatch(%{path: ["v2" | path]} = request, store) do
-    case handler(request.method, path) do
-      nil -> not_found("No such route")
-      handler -> authed(request, store, handler)
+    case "http" in request.bindings && handler(request.method, path) do
+      handler when is_function(handler) -> authed(request, store, handler)
+      _none -> not_found("No such route")
     end
   end
 
@@ -192,6 +211,7 @@ defmodule HcpConformance.Reference.ServerV2 do
   defp handler("POST", ["entries", id, "confirmation"]), do: governed(&confirm(&1, &2, &3, id))
   defp handler("PUT", ["entries", id, "categories"]), do: governed(&recategorize(&1, &2, &3, id))
   defp handler("PUT", ["entries", id, "purposes"]), do: governed(&restrict(&1, &2, &3, id))
+  defp handler("POST", ["shares"]), do: &report_share/3
   defp handler("GET", ["grants"]), do: &list_grants/3
   defp handler("DELETE", ["grants", id]), do: &revoke(&1, &2, &3, id)
   defp handler("GET", ["audit"]), do: governed(&audit/3)
@@ -221,20 +241,15 @@ defmodule HcpConformance.Reference.ServerV2 do
 
   defp discovery(request) do
     base = request.base
+    bindings = request.bindings
 
-    ok(200, %{
+    document = %{
       "hcp_version" => @version,
       "provider" => base,
       "provider_operator" => operator(request),
-      "conformsTo" => @conforms_to,
-      "bindings" => ["http"],
+      "conformsTo" => claims(bindings),
+      "bindings" => bindings,
       "jwks_uri" => base <> "/.well-known/jwks.json",
-      "entries_endpoint" => base <> "/v2/entries",
-      "grants_endpoint" => base <> "/v2/grants",
-      "audit_endpoint" => base <> "/v2/audit",
-      "export_endpoint" => base <> "/v2/export",
-      "rules_endpoint" => base <> "/v2/rules",
-      "directives_endpoint" => base <> "/v2/directives",
       "supported_categories" => ModelV2.described_categories(),
       "category_registry" => "1",
       "accepts_entry_schemas" => [ModelV2.entry_schema()],
@@ -242,10 +257,53 @@ defmodule HcpConformance.Reference.ServerV2 do
       "audit_durability" => %{"default" => "synchronous"},
       "audit_integrity" => "append-only",
       "storage_encryption" => "server",
-      "pagination" => %{"audit" => "cursor"},
-      "problem_type_base" => @problem_base,
       "rate_limits" => %{"documentation_url" => base <> "/.well-known/hcp-configuration"}
-    })
+    }
+
+    ok(
+      200,
+      document
+      |> Map.merge(http_members(base, bindings))
+      |> Map.merge(mcp_members(base, bindings))
+    )
+  end
+
+  defp claims(bindings), do: Enum.filter(@conforms_to, &claimed?(&1, bindings))
+
+  # A binding's identifier is claimed only where the binding is exposed (§19.3).
+  defp claimed?(identifier, bindings) do
+    case Regex.run(~r{/spec/bindings/(\w+)/}, identifier) do
+      [_match, binding] -> binding in bindings
+      nil -> true
+    end
+  end
+
+  # The members required where the HTTP Binding is exposed (§19.3).
+  defp http_members(base, bindings) do
+    if "http" in bindings do
+      %{
+        "entries_endpoint" => base <> "/v2/entries",
+        "grants_endpoint" => base <> "/v2/grants",
+        "audit_endpoint" => base <> "/v2/audit",
+        "export_endpoint" => base <> "/v2/export",
+        "rules_endpoint" => base <> "/v2/rules",
+        "directives_endpoint" => base <> "/v2/directives",
+        "shares_endpoint" => base <> "/v2/shares",
+        "pagination" => %{"audit" => "cursor"},
+        "problem_type_base" => @problem_base
+      }
+    else
+      %{}
+    end
+  end
+
+  defp mcp_members(base, bindings) do
+    if "mcp" in bindings,
+      do: %{
+        "mcp_endpoint" => base <> "/mcp",
+        "protected_resource_metadata" => McpV2.metadata_url(base)
+      },
+      else: %{}
   end
 
   defp operator(request), do: %{"id" => request.base, "name" => "HCP reference implementation"}
@@ -257,6 +315,125 @@ defmodule HcpConformance.Reference.ServerV2 do
       "operator" => operator(request)
     }
   end
+
+  # The MCP Binding (§10): the context operations as tools -------------------------------
+
+  defp mcp(request, store) do
+    case McpV2.parse(request) do
+      {:error, response} ->
+        response
+
+      {:ok, %{method: "server/discover"} = rpc} ->
+        McpV2.result(rpc, McpV2.discover(request.base, claims(request.bindings)))
+
+      {:ok, rpc} ->
+        request |> authed(store, &mcp_call(&1, &2, &3, rpc)) |> unauthenticated(request)
+    end
+  end
+
+  # §10.4: missing or invalid authorization is refused at the HTTP layer, with a challenge.
+  defp unauthenticated({401, body, type, headers}, request),
+    do: {401, body, type, [McpV2.unauthenticated(request.base) | headers]}
+
+  defp unauthenticated(response, _request), do: response
+
+  defp mcp_call(request, subject, _actor, %{method: "tools/list"} = rpc),
+    do: {McpV2.result(rpc, %{"tools" => McpV2.tools(request.faults)}), subject}
+
+  defp mcp_call(request, subject, actor, rpc) do
+    case McpV2.operation(rpc.params, subject.did) do
+      :unknown -> {McpV2.error(rpc, 200, -32_602, "Unknown tool"), subject}
+      {:invalid, detail} -> {McpV2.tool_error(rpc, "malformed-request", detail), subject}
+      {:ok, operation} -> call_tool(request, subject, actor, rpc, operation)
+    end
+  end
+
+  # A tool call runs the operation the HTTP Binding would, under the same grant
+  # (invariant 10). What the grant cannot cover whatever is stored is refused
+  # first, as a challenge the host can act on.
+  defp call_tool(request, subject, actor, rpc, operation) do
+    case insufficient(request, actor, operation) do
+      nil ->
+        handler = handler(operation.method, operation.path)
+        {outcome, subject} = handler.(Map.merge(request, operation), subject, actor)
+        {tool_response(request, rpc, operation, outcome), subject}
+
+      {scopes, description} ->
+        {insufficient_scope(request, scopes, description), subject}
+    end
+  end
+
+  defp insufficient_scope(request, scopes, description) do
+    {status, body, type, headers} = problem("scope-denied", description)
+    {status, body, type, [McpV2.challenge(request.base, scopes, description) | headers]}
+  end
+
+  defp tool_response(request, rpc, operation, {403, _, _, _} = outcome) do
+    # The fault answers a denial that depends on what is stored with a
+    # challenge, which tells the caller the entry exists.
+    if fault?(request, :mcp_existence_challenge) and operation.method == "GET",
+      do: insufficient_scope(request, ["hcp:unknown:read"], "The entry is outside the grant"),
+      else: McpV2.tool_result(rpc, outcome, request.faults)
+  end
+
+  defp tool_response(request, rpc, _operation, outcome) do
+    response = McpV2.tool_result(rpc, outcome, request.faults)
+    if fault?(request, :mcp_token_echo), do: echo_token(response, request), else: response
+  end
+
+  defp echo_token({status, body, type, headers}, request) do
+    leak = %{"type" => "text", "text" => "token: #{bearer(request)}"}
+    {status, update_in(body, ["result", "content"], &(&1 ++ [leak])), type, headers}
+  end
+
+  # §10.4: the scopes a request needs that the grant lacks, with why, where the
+  # denial follows from the request alone; nil where it does not, or cannot.
+  defp insufficient(request, actor, operation) do
+    if management?(actor) or fault?(request, :mcp_no_challenge),
+      do: nil,
+      else: lacking(actor.grant, operation)
+  end
+
+  defp lacking(grant, %{path: ["entries", "query"], json: body}) do
+    purpose = body["purpose"]
+    readable = ModelV2.categories_for(grant, "read")
+    wanted = if is_list(body["categories"]), do: body["categories"], else: readable
+
+    approved =
+      if is_binary(purpose), do: ModelV2.readable_categories(grant, purpose), else: wanted
+
+    cond do
+      wanted -- readable != [] -> uncovered(wanted -- readable, "read")
+      wanted == [] or wanted -- approved != [] -> unapproved(wanted, purpose)
+      true -> nil
+    end
+  end
+
+  defp lacking(grant, %{method: "GET", query: %{"purpose" => purpose}}) do
+    if ModelV2.readable_categories(grant, purpose) == [],
+      do: unapproved(ModelV2.categories_for(grant, "read"), purpose)
+  end
+
+  defp lacking(grant, %{method: "POST", path: ["entries"], json: body}) do
+    categories = get_in(body, ["classification", "categories"])
+
+    missing =
+      if is_list(categories), do: categories -- ModelV2.categories_for(grant, "write"), else: []
+
+    if missing != [] and Enum.all?(missing, &ModelV2.category?/1), do: uncovered(missing, "write")
+  end
+
+  defp lacking(_grant, _operation), do: nil
+
+  defp uncovered(categories, action),
+    do:
+      {Enum.map(categories, &"hcp:#{&1}:#{action}"),
+       "The grant does not cover #{action} on #{Enum.join(categories, ", ")}"}
+
+  defp unapproved(categories, purpose),
+    do:
+      {Enum.map(categories, &"hcp:#{&1}:read"),
+       "The grant does not approve the purpose #{purpose}"}
 
   # Authentication and authorization ---------------------------------------------------
 
@@ -764,6 +941,65 @@ defmodule HcpConformance.Reference.ServerV2 do
         else: result
 
     {ok(200, result), subject}
+  end
+
+  # Onward sharing (§3.12, §5.2.8) ----------------------------------------------------------
+
+  # A client tells the provider what it shared with another organization. The
+  # share has already happened, so it is recorded whether or not the grant
+  # allowed it.
+  defp report_share(_request, subject, %{grant: nil}),
+    do:
+      {problem("scope-denied", "A share is reported by the client that shared, under its grant"),
+       subject}
+
+  defp report_share(request, subject, actor) do
+    case share(json(request)) do
+      nil ->
+        detail = "a share names its recipient, refs, purpose and sharedAt"
+        {problem("malformed-request", detail), subject}
+
+      share ->
+        record_share(request, subject, actor, share)
+    end
+  end
+
+  # The members of a report (§5.2.8), or nil where one is missing.
+  defp share(%{"recipient" => %{"domain" => domain, "name" => name}, "refs" => [_ | _]} = body)
+       when is_binary(domain) and is_binary(name) do
+    if is_binary(body["purpose"]) and is_binary(body["sharedAt"]),
+      do: Map.take(body, ["recipient", "refs", "purpose", "sharedAt"])
+  end
+
+  defp share(_body), do: nil
+
+  defp record_share(request, subject, actor, %{"refs" => refs, "purpose" => purpose} = share) do
+    domain = share["recipient"]["domain"]
+
+    entries =
+      for ref <- refs,
+          {:ok, id} <- [resolve(request, subject, actor, to_string(ref))],
+          do: current(subject, id)
+
+    permitted =
+      length(entries) == length(refs) and purpose in approved(actor.grant) and
+        Enum.all?(entries, &ModelV2.share_permitted?(actor.grant, &1, domain))
+
+    data =
+      share
+      |> Map.take(["recipient", "purpose", "sharedAt"])
+      |> Map.merge(%{"entries" => Enum.map(entries, & &1["id"]), "permitted" => permitted})
+
+    event = %{"purpose" => purpose, "data" => data}
+
+    subject =
+      if fault?(request, :share_unrecorded) and not permitted,
+        do: subject,
+        else: append(subject, request, "context.shared", actor, event)
+
+    if permitted,
+      do: {no_content(), subject},
+      else: {problem("scope-denied", "The grant does not allow this share"), subject}
   end
 
   # Revise, withdraw, hard delete ---------------------------------------------------------

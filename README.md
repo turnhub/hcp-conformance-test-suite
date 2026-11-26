@@ -29,8 +29,8 @@ exists for.
 | | |
 | --- | --- |
 | Specification | HCP v1, 1.0-draft-4 (September 2026); HCP v2, 2.0-draft-3 (November 2026) |
-| Checks | v1: 94 (see [docs/CHECKS.md](docs/CHECKS.md)); v2: 127 (see [docs/CHECKS-v2.md](docs/CHECKS-v2.md)) |
-| Transports | v1: RESTful HTTP in full, MCP manifest only; v2: the HTTP Binding, for the First-Party package |
+| Checks | v1: 94 (see [docs/CHECKS.md](docs/CHECKS.md)); v2: 153 (see [docs/CHECKS-v2.md](docs/CHECKS-v2.md)) |
+| Transports | v1: RESTful HTTP in full, MCP manifest only; v2: the HTTP Binding and the MCP Binding over Streamable HTTP, for the First-Party package |
 | Built with | Elixir 1.20, Phoenix 1.8 and LiveView, daisyUI; no database |
 | Guardrails | Boundary, Credo (strict), Dialyzer and the test suite, locally (`mix precommit`) and in GitHub Actions |
 
@@ -289,12 +289,15 @@ implementation for it, and leaves v1's untouched.
   ([docs/HOOK.md](docs/HOOK.md#hcp-v2)). Without the hook, give the subject's
   identifier as well as the tokens (`--subject-did`): a v2 entry must name its
   Context Subject.
-- **What is checked.** 127 checks over the HTTP Binding for the First-Party
-  package: Core, the General Context Profile and the First-Party Authorization
-  Profile. [docs/CHECKS-v2.md](docs/CHECKS-v2.md) lists them.
-- **What is not, yet.** The MCP Binding, the OAuth, VC Evidence, Memory Manager
-  and Delegated Authorization profiles, import, onward sharing, the disclosure
-  summary, revocation notifications and JSON Schema validation. A pass is a
+- **What is checked.** 153 checks for the First-Party package over both
+  bindings: Core, the General Context Profile, the First-Party Authorization
+  Profile, the HTTP Binding, and the MCP Binding over Streamable HTTP.
+  [docs/CHECKS-v2.md](docs/CHECKS-v2.md) lists them. A target gets the checks
+  of the bindings it lists; an MCP-only vault gets the tool checks, and `N/A`
+  on what needs the governance plane, which only the HTTP Binding carries.
+- **What is not, yet.** MCP over stdio, the OAuth, VC Evidence, Memory Manager
+  and Delegated Authorization profiles, import, the disclosure summary,
+  revocation notifications and JSON Schema validation. A pass is a
   claim about the surface checked, not about all of v2.
   [docs/V2.md](docs/V2.md) has the full list, and the notes from reviewing
   Draft 3 for its editors.
@@ -447,12 +450,12 @@ Layout:
 | Path | What |
 | --- | --- |
 | `lib/hcp_conformance/checks/` | The v1 checks, one module per group |
-| `lib/hcp_conformance/v2/` | The v2 checks, their fixtures, and what a v2 run reads from discovery |
+| `lib/hcp_conformance/v2/` | The v2 checks, their fixtures, what a v2 run reads from discovery, and the suite's MCP client (`mcp.ex`) |
 | `lib/hcp_conformance/spec.ex`, `catalog.ex` | The versions the suite checks, and each one's catalogue |
 | `lib/hcp_conformance/runner.ex`, `context.ex`, `report.ex` | Running a suite: setup, sequencing, verdict |
 | `lib/hcp_conformance/http.ex`, `transcript.ex`, `target_guard.ex` | Talking to targets, recording, redaction, private-network guard |
 | `lib/hcp_conformance/envelope.ex` | The §2.2 envelope rules, in either form |
-| `lib/hcp_conformance/reference/` | The reference HCP implementations (`server.ex` for v1, `server_v2.ex` and `model_v2.ex` for v2) and their conformance hook |
+| `lib/hcp_conformance/reference/` | The reference HCP implementations (`server.ex` for v1; `server_v2.ex`, `model_v2.ex` and `mcp_v2.ex` for v2) and their conformance hook |
 | `lib/hcp_conformance/runs.ex`, `settings.ex` | Starting runs from the web, the concurrency cap, deployment settings |
 | `lib/hcp_conformance/vault.ex`, `vault/v2.ex`, `assistants.ex`, `open_ai.ex`, `anthropic.ex` | The chat page's vault client for either version (grants, memories, recall, confirmation, audit, export) and the assistants it talks to |
 | `lib/hcp_conformance_web/` | The Phoenix app: connect page, run and chat LiveViews, API, reference mount |

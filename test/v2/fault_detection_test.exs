@@ -43,7 +43,16 @@ defmodule HcpConformance.V2.FaultDetectionTest do
     {:rule_ignored, ~w(rules.set rules.other_operators_unaffected rules.enforced),
      ~w(rules.enforced)},
     {:no_directives, ~w(directives.set directives.delivered), ~w(directives.delivered)},
-    {:plain_cursor, ~w(audit.pagination audit.cursor_opaque), ~w(audit.cursor_opaque)}
+    {:plain_cursor, ~w(audit.pagination audit.cursor_opaque), ~w(audit.cursor_opaque)},
+    {:share_unrecorded, ~w(sharing.report sharing.not_permitted), ~w(sharing.not_permitted)},
+    {:mcp_missing_tool, ~w(mcp.discover mcp.tools), ~w(mcp.tools)},
+    {:mcp_governance_tool, ~w(mcp.tools mcp.no_governance_tools), ~w(mcp.no_governance_tools)},
+    {:mcp_text_only, ~w(mcp.unknown_tool mcp.query), ~w(mcp.query)},
+    {:mcp_no_challenge,
+     ~w(mcp.existence_hidden mcp.category_challenge mcp.purpose_challenge mcp.write_challenge),
+     ~w(mcp.category_challenge mcp.purpose_challenge mcp.write_challenge)},
+    {:mcp_existence_challenge, ~w(mcp.get_entry mcp.existence_hidden), ~w(mcp.existence_hidden)},
+    {:mcp_token_echo, ~w(mcp.query mcp.token_not_returned), ~w(mcp.token_not_returned)}
   ]
 
   for {fault, only, failing} <- @cases do

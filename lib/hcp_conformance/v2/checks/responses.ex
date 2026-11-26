@@ -75,11 +75,14 @@ defmodule HcpConformance.V2.Checks.Responses do
     ]
   end
 
-  # Responses from the target's HCP surface: not the hook, and only ones that arrived.
+  # Responses of the HTTP Binding: not the hook, not the MCP endpoint, whose
+  # errors are JSON-RPC's and MCP's (§10.4), and only ones that arrived.
   defp responses(ctx) do
     ctx.transcript
     |> Transcript.exchanges()
-    |> Enum.filter(&(&1.kind == :target and is_integer(&1.status)))
+    |> Enum.filter(
+      &(&1.kind == :target and is_integer(&1.status) and &1.url != ctx.endpoints[:mcp])
+    )
   end
 
   defp facts(exchange), do: exchange.facts || %{object: false}

@@ -49,6 +49,27 @@ defmodule HcpConformanceWeb.V2Test do
              HcpConformance.Runs.run(config)
   end
 
+  test "the v2 reference's MCP endpoint is served inside the mount, and a run reaches it", %{
+    conn: conn
+  } do
+    body = conn |> get("/reference/hcp-v2/.well-known/hcp-configuration") |> json_response(200)
+    assert body["mcp_endpoint"] == ReferenceMount.base_url() <> "/hcp-v2/mcp"
+    assert "mcp" in body["bindings"]
+
+    local = ReferenceMount.local_url("2.0")
+
+    {:ok, config} =
+      HcpConformance.Runs.config(%{
+        "target" => local,
+        "hook_url" => local <> "/conformance-hook",
+        "hook_secret" => "reference-hook-secret",
+        "groups" => ["mcp"]
+      })
+
+    assert {:ok, %{verdict: "pass", results: results}} = HcpConformance.Runs.run(config)
+    assert Enum.all?(results, &(&1.status == :pass))
+  end
+
   test "the connect page offers a reference of each version and a version to pick", %{conn: conn} do
     document = conn |> get(~p"/") |> html_response(200) |> LazyHTML.from_document()
 
