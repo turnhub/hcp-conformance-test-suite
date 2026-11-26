@@ -1,10 +1,12 @@
 # HCP conformance suite
 
-A standalone conformance test suite for the **Human Context Protocol (HCP) v1**,
-draft 4 (`1.0-draft-4`). Point it at any HCP implementation reachable over HTTP,
-and it checks the implementation against the specification and reports each
+A standalone conformance test suite for the **Human Context Protocol (HCP)**:
+v1, frozen at draft 4 (`1.0-draft-4`), and v2 at its latest draft
+(`2.0-draft-3`). Point it at any HCP implementation reachable over HTTP, and it
+checks the implementation against the specification and reports each
 requirement as passed, failed, skipped or not applicable, with the HTTP exchanges
-behind every finding.
+behind every finding. A run checks one version, named or read from the target;
+see [HCP v2](#hcp-v2).
 
 It runs three ways from one codebase:
 
@@ -19,16 +21,16 @@ It also has a **portable memory chat**: ChatGPT and Claude using memories that
 live in the target's HCP vault, only through grants the person issues, narrows
 and revokes on the page (see [Portable memory](#portable-memory)).
 
-It ships with a **reference HCP implementation** that passes every check. The
-suite's own tests run against it twice: once as written, and once with a
+It ships with a **reference HCP implementation** of each version that passes
+every check of that version. The suite's own tests run against it twice: once as written, and once with a
 deliberate defect per check, to prove that each check catches the defect it
 exists for.
 
 | | |
 | --- | --- |
-| Specification | HCP v1, 1.0-draft-4 (September 2026) |
-| Checks | 94 (see [docs/CHECKS.md](docs/CHECKS.md)) |
-| Transports | RESTful HTTP in full; MCP manifest only |
+| Specification | HCP v1, 1.0-draft-4 (September 2026); HCP v2, 2.0-draft-3 (November 2026) |
+| Checks | v1: 94 (see [docs/CHECKS.md](docs/CHECKS.md)); v2: 127 (see [docs/CHECKS-v2.md](docs/CHECKS-v2.md)) |
+| Transports | v1: RESTful HTTP in full, MCP manifest only; v2: the HTTP Binding, for the First-Party package |
 | Built with | Elixir 1.20, Phoenix 1.8 and LiveView, daisyUI; no database |
 | Guardrails | Boundary, Credo (strict), Dialyzer and the test suite, locally (`mix precommit`) and in GitHub Actions |
 
@@ -38,6 +40,7 @@ exists for.
 - [Portable memory](#portable-memory)
 - [What a target needs](#what-a-target-needs)
 - [What it checks](#what-it-checks)
+- [HCP v2](#hcp-v2)
 - [Reading a report](#reading-a-report)
 - [Hosting it](#hosting-it)
 - [Developing the suite](#developing-the-suite)
@@ -143,6 +146,7 @@ the report.
 | `--agent-token T` | Without a hook: a client with read and write on the category. Also `HCP_AGENT_TOKEN`. |
 | `--subject-did D` | The subject's DID, written as `claim.subject.id`. |
 | `--category C` | The category to work in. Defaults to the first supported one. |
+| `--spec-version V` | `1.0` or `2.0`. Without it, the version is read from the target's discovery document. With `--list`, the catalogue to print. |
 | `--groups a,b` / `--only id,id` | Run a selection. The verdict then says it is not a conformance claim. |
 | `--json FILE` | Write the full report, transcript included. |
 | `--verbose` | Print the HTTP exchanges behind each failure. |
@@ -233,6 +237,7 @@ such a hook, but that specification is unpublished, so this suite defines it in
 
 ## What it checks
 
+For v1 (v2's groups are in [docs/V2.md](docs/V2.md#what-the-v2-checks-cover)):
 94 checks in eleven groups. Each names its section and its strength (MUST or
 SHOULD). The full list with the requirement each check tests is in
 [docs/CHECKS.md](docs/CHECKS.md).
@@ -253,6 +258,45 @@ SHOULD). The full list with the requirement each check tests is in
 
 The `responses` group checks every response the target gave during the run, not
 just a sample.
+
+## HCP v2
+
+v2 reorganizes the protocol rather than extending it: conformance claims by
+Part instead of one level, a Management Client and Context Clients on two
+planes, entries disclosed to clients under grant-scoped references with a
+use-until time, purposes the person approves, standing rules and directives.
+The suite therefore has a second catalogue and a second reference
+implementation for it, and leaves v1's untouched.
+
+- **Picking the version.** `--spec-version 2.0` on the CLI, `"spec_version":
+  "2.0"` in an API run, or the version select on the connect page. The CLI and
+  the API read it from the target's `hcp_version` when it is left out.
+- **What a target needs.** The same three modes. The hook's grant call takes
+  `access` details and the Client Operator for v2
+  ([docs/HOOK.md](docs/HOOK.md#hcp-v2)). Without the hook, give the subject's
+  identifier as well as the tokens (`--subject-did`): a v2 entry must name its
+  Context Subject.
+- **What is checked.** 127 checks over the HTTP Binding for the First-Party
+  package: Core, the General Context Profile and the First-Party Authorization
+  Profile. [docs/CHECKS-v2.md](docs/CHECKS-v2.md) lists them.
+- **What is not, yet.** The MCP Binding, the OAuth, VC Evidence, Memory Manager
+  and Delegated Authorization profiles, import, onward sharing, the disclosure
+  summary, revocation notifications and JSON Schema validation. A pass is a
+  claim about the surface checked, not about all of v2.
+  [docs/V2.md](docs/V2.md) has the full list, and the notes from reviewing
+  Draft 3 for its editors.
+- **Try it.** A hosted instance serves the v2 reference at `/reference/hcp-v2`;
+  the connect page has a button for it. Locally:
+
+  ```bash
+  mix phx.server
+  mix hcp.conformance --spec-version 2.0 --allow-private \
+    --target http://localhost:4000/reference/hcp-v2 \
+    --hook-url http://localhost:4000/reference/hcp-v2/conformance-hook \
+    --hook-secret reference-hook-secret
+  ```
+
+The chat page works with v1 targets only.
 
 ## Reading a report
 
@@ -339,10 +383,11 @@ then applies per instance.
 
 ```bash
 mix setup
-mix test           # about 130 tests, 10 seconds; no network beyond localhost
+mix test           # about 190 tests, 10 seconds; no network beyond localhost
 mix precommit      # compile with warnings as errors (Boundary included), unused deps,
                    # format, credo --strict, tests, dialyzer
 mix hcp.checks > docs/CHECKS.md    # after adding or changing a check; a test enforces it
+mix hcp.checks --spec-version 2.0 > docs/CHECKS-v2.md    # the same for a v2 check
 ```
 
 **Guardrails.** Boundary fails the build when a module reaches across a boundary
@@ -369,7 +414,8 @@ The test endpoint listens on port 4002, so the LiveView and API tests run real
 suites against the reference implementation the app serves.
 
 The tests run every check against the reference server in hook, static and
-anonymous mode, and require a clean pass. `test/fault_detection_test.exs` then
+anonymous mode, and require a clean pass; `test/v2/` does the same for the v2
+checks and the v2 reference. `test/fault_detection_test.exs` then
 switches on one defect at a time in the reference server, such as padding search
 results or leaking a conflicted entry's old version. It requires the matching check
 to fail and the others to keep passing. Two checks were blind to their defect
@@ -380,26 +426,32 @@ daisyUI component classes, nothing hand-styled. AGENTS.md records this for
 agents working in the repo.
 
 **Adding a check.** Add a `Check.new/6` to the right module in
-`lib/hcp_conformance/checks/`. Then add a fault to the reference server and a
-case to the fault tests that proves the check catches it. Finally, regenerate
-docs/CHECKS.md.
+`lib/hcp_conformance/checks/` (v1) or `lib/hcp_conformance/v2/checks/` (v2).
+Then add a fault to that version's reference server and a case to its fault
+tests that proves the check catches it. Finally, regenerate the version's
+catalogue document.
 
 Layout:
 
 | Path | What |
 | --- | --- |
-| `lib/hcp_conformance/checks/` | The checks, one module per group |
+| `lib/hcp_conformance/checks/` | The v1 checks, one module per group |
+| `lib/hcp_conformance/v2/` | The v2 checks, their fixtures, and what a v2 run reads from discovery |
+| `lib/hcp_conformance/spec.ex`, `catalog.ex` | The versions the suite checks, and each one's catalogue |
 | `lib/hcp_conformance/runner.ex`, `context.ex`, `report.ex` | Running a suite: setup, sequencing, verdict |
 | `lib/hcp_conformance/http.ex`, `transcript.ex`, `target_guard.ex` | Talking to targets, recording, redaction, private-network guard |
 | `lib/hcp_conformance/envelope.ex` | The §2.2 envelope rules, in either form |
-| `lib/hcp_conformance/reference/` | The reference HCP implementation and its conformance hook |
+| `lib/hcp_conformance/reference/` | The reference HCP implementations (`server.ex` for v1, `server_v2.ex` and `model_v2.ex` for v2) and their conformance hook |
 | `lib/hcp_conformance/runs.ex`, `settings.ex` | Starting runs from the web, the concurrency cap, deployment settings |
 | `lib/hcp_conformance/vault.ex`, `assistants.ex`, `open_ai.ex`, `anthropic.ex` | The chat page's vault client (grants, memories, recall, audit, export) and the assistants it talks to |
 | `lib/hcp_conformance_web/` | The Phoenix app: connect page, run and chat LiveViews, API, reference mount |
 | `lib/hcp_conformance_web/exchanges.ex`, `markdown.ex` | The HTTP exchange component both pages show; Markdown for docs pages and replies |
-| `docs/HOOK.md`, `docs/CHECKS.md` | The hook protocol (also served at `/hook`) and the check catalogue (`/checks` lists the same checks) |
+| `docs/HOOK.md`, `docs/CHECKS.md`, `docs/CHECKS-v2.md` | The hook protocol (also served at `/hook`) and the check catalogues (`/checks` lists the same checks) |
+| `docs/V2.md` | v2 in the suite: coverage, gaps, and review notes on the draft |
 
 ## Known limits
+
+These are v1's. v2's are in [docs/V2.md](docs/V2.md#what-they-do-not-cover-yet).
 
 - **MCP**: the manifest is checked; tool calls over MCP are not exercised yet.
 - **OAuth 2.0**: declared endpoints are checked for presence; the flows are not

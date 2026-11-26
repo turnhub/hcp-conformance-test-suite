@@ -9,7 +9,7 @@ defmodule HcpConformance.Context do
   context points at, so the struct can be handed to checks running in tasks.
   """
 
-  alias HcpConformance.{Assert, Config, Hook, HTTP, Transcript}
+  alias HcpConformance.{Assert, Config, Hook, HTTP, Spec, Transcript, V2}
 
   @registered_categories ~w(general_preferences goals_and_constraints health_context education_learner_profile
                             work_context purchase_history_preferences values_and_ethics location_context
@@ -17,6 +17,7 @@ defmodule HcpConformance.Context do
 
   defstruct [
     :config,
+    :spec_version,
     :transcript,
     :state,
     :discovery,
@@ -65,6 +66,7 @@ defmodule HcpConformance.Context do
       nonce: random_word(10)
     }
     |> load_discovery()
+    |> resolve_version()
     |> resolve_endpoints()
     |> choose_categories()
     |> authenticate(Keyword.get(opts, :default_grant, true))
@@ -115,6 +117,9 @@ defmodule HcpConformance.Context do
   def url(ctx, name), do: Map.fetch!(ctx.endpoints, name)
 
   @spec entry_url(t(), String.t()) :: String.t()
+  def entry_url(%__MODULE__{spec_version: "2.0"} = ctx, id),
+    do: ctx.endpoints.entries <> "/" <> segment(id)
+
   def entry_url(ctx, id), do: ctx.endpoints.preferences <> "/" <> segment(id)
 
   @spec grant_url(t(), String.t()) :: String.t()
@@ -144,9 +149,10 @@ defmodule HcpConformance.Context do
 
   @doc """
   Issues a grant through the hook, as the subject's own act. `opts`: `:scopes`
-  (required), `:grant_type` ("temporary"), `:expires_in` (seconds, 3600),
+  (required for v1), `:grant_type` ("temporary"), `:expires_in` (seconds, 3600),
   `:restrictions`, `:client_name`, `:client_id` (a fresh one per grant unless
-  given). Skips when the run has no hook.
+  given). A v2 run describes the grant as `HcpConformance.V2.Target.grant_attrs/2`
+  sets out instead of by `:scopes`. Skips when the run has no hook.
   """
   @spec issue_grant!(t(), keyword()) :: map()
   def issue_grant!(ctx, opts) do
@@ -170,8 +176,6 @@ defmodule HcpConformance.Context do
       %{
         "clientId" => client_id,
         "clientName" => Keyword.get(opts, :client_name, "HCP conformance client " <> client_id),
-        "actorType" => "agent",
-        "scopes" => Keyword.fetch!(opts, :scopes),
         "grantType" => grant_type
       }
       |> put_if(
@@ -179,7 +183,7 @@ defmodule HcpConformance.Context do
         "expiresInSeconds",
         Keyword.get(opts, :expires_in, 3600)
       )
-      |> put_if(Keyword.has_key?(opts, :restrictions), "restrictions", opts[:restrictions])
+      |> Map.merge(access_attrs(ctx, opts))
 
     case Hook.issue_grant(
            ctx.transcript,
@@ -192,11 +196,20 @@ defmodule HcpConformance.Context do
       {:ok, grant} ->
         Transcript.add_secret(ctx.transcript, grant.token)
         Agent.update(ctx.state, &%{&1 | grants: [grant.grant_id | &1.grants]})
-        {:ok, Map.put(grant, :scopes, attrs["scopes"])}
+        {:ok, Map.put(grant, :scopes, attrs["scopes"] || V2.Target.scopes(attrs["access"]))}
 
       {:error, message} ->
         {:error, message}
     end
+  end
+
+  # What the grant authorizes, in the shape the version's hook takes (docs/HOOK.md).
+  defp access_attrs(%__MODULE__{spec_version: "2.0"} = ctx, opts),
+    do: V2.Target.grant_attrs(ctx, opts)
+
+  defp access_attrs(_ctx, opts) do
+    %{"actorType" => "agent", "scopes" => Keyword.fetch!(opts, :scopes)}
+    |> put_if(Keyword.has_key?(opts, :restrictions), "restrictions", opts[:restrictions])
   end
 
   @doc "Remembers an entry the suite created, for cleanup in static mode."
@@ -234,6 +247,25 @@ defmodule HcpConformance.Context do
       error in HTTP.TransportError ->
         %{ctx | setup_notes: ctx.setup_notes ++ ["discovery request failed: " <> error.message]}
     end
+  end
+
+  defp resolve_version(ctx),
+    do: %{ctx | spec_version: ctx.config.spec_version || Spec.detect(ctx.discovery)}
+
+  defp resolve_endpoints(%__MODULE__{spec_version: "2.0"} = ctx) do
+    target = V2.Target.resolve(ctx.discovery || %{}, ctx.config)
+
+    capabilities =
+      ctx.capabilities
+      |> put_capability(target.http?, :rest)
+      |> put_capability(target.mcp?, :mcp)
+
+    %{
+      ctx
+      | endpoints: target.endpoints,
+        capabilities: capabilities,
+        read_window_ms: target.read_window_ms
+    }
   end
 
   defp resolve_endpoints(ctx) do
@@ -276,9 +308,9 @@ defmodule HcpConformance.Context do
 
   defp choose_categories(ctx) do
     supported =
-      case ctx.discovery && ctx.discovery["supported_categories"] do
-        list when is_list(list) and list != [] -> Enum.filter(list, &is_binary/1)
-        _other -> @registered_categories
+      case supported_categories(ctx) do
+        [] -> @registered_categories
+        list -> list
       end
 
     primary = ctx.config.category || hd(supported ++ ["general_preferences"])
@@ -293,6 +325,17 @@ defmodule HcpConformance.Context do
         capabilities: put_capability(ctx.capabilities, second != nil, :second_category)
     }
   end
+
+  # v1 lists category slugs; v2 describes each category, and scope strings can
+  # only name registered ones (v2 §6.1.1), so the suite works in those.
+  defp supported_categories(%__MODULE__{discovery: %{"supported_categories" => list}} = ctx)
+       when is_list(list) do
+    if ctx.spec_version == "2.0",
+      do: V2.Target.registered(list, @registered_categories),
+      else: Enum.filter(list, &is_binary/1)
+  end
+
+  defp supported_categories(_ctx), do: []
 
   defp authenticate(ctx, default_grant) do
     case Config.mode(ctx.config) do
@@ -333,7 +376,12 @@ defmodule HcpConformance.Context do
   end
 
   defp default_agent(ctx) do
-    grant = issue_grant!(ctx, scopes: scopes(ctx.primary_category, ["read", "write"]))
+    grant =
+      issue_grant!(ctx,
+        scopes: scopes(ctx.primary_category, ["read", "write"]),
+        actions: ["read", "write"]
+      )
+
     agent = Map.put(grant, :scopes, scopes(ctx.primary_category, ["read", "write"]))
     %{ctx | agent: agent, capabilities: [:agent | ctx.capabilities]}
   rescue
@@ -363,7 +411,8 @@ defmodule HcpConformance.Context do
   defp describe_static_agent(ctx, token) do
     response = request(ctx, :get, ctx.endpoints.grants, token: token)
 
-    with %{status: 200, json: %{"grants" => [grant | _]}} <- response,
+    with %{status: 200, json: %{} = body} <- response,
+         [grant | _] <- V2.Target.grants(body),
          scopes when is_list(scopes) <- grant["scopes"],
          true <- Enum.all?(scopes(ctx.primary_category, ["read", "write"]), &(&1 in scopes)) do
       agent = %{

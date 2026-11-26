@@ -2,8 +2,8 @@
   <.header>
     HCP conformance suite
     <:subtitle>
-      Checks an implementation of the Human Context Protocol v1 (1.0-draft-4) against the
-      specification, over the network. Credentials live in your encrypted session cookie and
+      Checks an implementation of the Human Context Protocol, v1 (1.0-draft-4) or v2
+      (2.0-draft-3), against the specification, over the network. Credentials live in your encrypted session cookie and
       are never stored by the server.
     </:subtitle>
   </.header>
@@ -14,22 +14,34 @@
     <.button navigate={~p"/run"} id="continue">Continue to the run</.button>
   </div>
 
-  <div :if={@reference} id="reference" class="card bg-base-200">
+  <div :if={@references != []} id="reference" class="card bg-base-200">
     <div class="card-body">
       <h2 class="card-title">Try it first</h2>
-      <p>This instance hosts a reference HCP implementation with the conformance hook.</p>
       <p>
-        Runs reach it inside this instance, at <code class="break-all">{@reference.target}</code>, so
+        This instance hosts a reference HCP implementation of each version, with the conformance
+        hook.
+      </p>
+      <p>
+        Runs reach them inside this instance, under <code class="break-all">{hd(@references).target}</code>, so
         nothing in front of its public address, such as a proxy or a login, gets in the way.
       </p>
-      <.form for={%{}} as={:connection} action={~p"/session"} id="reference-form">
-        <.input type="hidden" name="connection[target]" value={@reference.target} />
-        <.input type="hidden" name="connection[hook_url]" value={@reference.hook_url} />
-        <.input type="hidden" name="connection[hook_secret]" value={@reference.hook_secret} />
-        <div class="card-actions">
-          <.button id="use-reference">Use the reference implementation</.button>
-        </div>
-      </.form>
+      <div class="card-actions">
+        <.form
+          :for={reference <- @references}
+          for={%{}}
+          as={:connection}
+          action={~p"/session"}
+          id={"reference-form-v#{String.first(reference.version)}"}
+        >
+          <.input type="hidden" name="connection[target]" value={reference.target} />
+          <.input type="hidden" name="connection[hook_url]" value={reference.hook_url} />
+          <.input type="hidden" name="connection[hook_secret]" value={reference.hook_secret} />
+          <.input type="hidden" name="connection[spec_version]" value={reference.version} />
+          <.button id={"use-reference-v#{String.first(reference.version)}"}>
+            Use the {reference.label} reference
+          </.button>
+        </.form>
+      </div>
     </div>
   </div>
 
@@ -45,6 +57,12 @@
       field={@form[:discovery_url]}
       type="url"
       label="Discovery URL (optional, if not under the base URL)"
+    />
+    <.input
+      field={@form[:spec_version]}
+      type="select"
+      label="Specification version"
+      options={@versions}
     />
 
     <fieldset class="fieldset">
@@ -79,7 +97,11 @@
         label="Agent token (optional, read and write on the category)"
         autocomplete="off"
       />
-      <.input field={@form[:subject_did]} type="text" label="Subject DID (optional)" />
+      <.input
+        field={@form[:subject_did]}
+        type="text"
+        label="Subject identifier (optional for v1; v2 entries must name their Context Subject)"
+      />
     </fieldset>
 
     <.input

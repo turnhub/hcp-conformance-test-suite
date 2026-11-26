@@ -1,5 +1,8 @@
 # The HCP conformance hook
 
+The hook is the same three calls for HCP v1 and v2. What follows describes them
+for v1; [HCP v2](#hcp-v2) at the end says what differs.
+
 HCP v1 draft 4, §5.4, says a first-party implementation still needs "a means
 for the suite to obtain a credential and trigger grant creation", and that the
 conformance suite's own specification defines a test hook for it. That
@@ -132,3 +135,78 @@ test subjects for inspection may answer 405.
 Hook responses are recorded in the run's transcript with their tokens redacted.
 They are excluded from the checks on response format, because the hook is not
 part of the HCP surface.
+
+## HCP v2
+
+HCP v2 draft 3 keeps the hook, in §20.2: a First-Party implementation still
+needs a means for the suite to obtain a credential and trigger grant creation,
+and "the suite specification defines a test hook". This is that definition. The
+section also notes that a grant created through the hook is not the Authorizing
+Principal's act, so a deployment holding a real person's context cannot offer
+it.
+
+The three calls, their paths and their authentication are unchanged. Two things
+differ.
+
+### The person's credential is a Management Client
+
+`personToken` authenticates a Management Client acting for the Authorizing
+Principal, who is the Context Subject (§3.2.3). It performs the governance
+operations of §5.4 (grants, audit log, export, hard delete, confirmation,
+categories, purposes, standing rules, directives) as well as context
+operations, receives entries whole and names them by `id`. `subjectDid` is the
+Context Subject's identifier, in any URI form: the suite writes it as
+`subject.id` in every entry, and a v2 provider rejects an entry that names
+anyone else (§4.2), so return it.
+
+### A grant is described by its access
+
+The request to `POST {hook_url}/subjects/{subjectId}/grants` carries `access`
+and `operator` in place of v1's `scopes`, `restrictions` and `actorType`:
+
+```json
+{
+  "clientId": "hcp-conformance-abcdefgh",
+  "clientName": "HCP conformance client hcp-conformance-abcdefgh",
+  "operator": { "id": "https://conformance.hcp.example", "name": "HCP conformance suite" },
+  "access": [
+    {
+      "actions": ["read", "write"],
+      "categories": ["general_preferences"],
+      "purposes": [
+        { "code": "https://conformance.hcp.example/purposes/conformance-check", "description": "HCP conformance run" }
+      ],
+      "narrowedTo": { "entryIds": ["urn:uuid:…"] }
+    }
+  ],
+  "grantType": "temporary",
+  "expiresInSeconds": 3600
+}
+```
+
+| Member | Required | Meaning |
+| --- | --- | --- |
+| `clientId`, `clientName` | yes | As for v1: the Context Client the grant is issued to. |
+| `operator` | yes | The client's Client Operator (§3.2.8), recorded as `client.operator` on the grant. The suite names operators of its own to test standing rules, so record what is sent. |
+| `access` | yes | The grant's authorization details (§6.1.5): `actions` (`read`, `write`, `provenance`), `categories`, and the `purposes` approved, each with a `code` and a `description`. Add the `type` yourself. |
+| `access[].narrowedTo` | no | Narrows the detail (§6.1.5.1). The suite uses `entryIds`, holding entry `id`s. A key you do not support must be refused: the suite sends one to check that unknown narrowing fails closed. |
+| `grantType`, `expiresInSeconds` | as for v1 | Temporary or persistent, and the lifetime of a temporary grant. |
+
+The response is v1's: `grantId`, `token` and `expiresAt`. The token
+authenticates the Context Client, which registers no notification endpoint, so
+its disclosures are usable for an hour at most (§7.6).
+
+The grant must be indistinguishable from one obtained through the real channel:
+listed by `GET /v2/grants` as a grant object, enforced on every request, and
+recorded as `grant.issued` with its `access`, `grantType`, `expiresAt` and a
+`modality` naming the hook. Answer 4xx, and issue nothing, when:
+
+| Request | Why |
+| --- | --- |
+| A detail with no purpose, an unknown action or a category you do not hold | §6.1.5, §6.1.5.2 |
+| A `narrowedTo` key you do not support | §6.1.5.1, rule 2 |
+| A category a standing rule denies the `operator` | §6.3 |
+| A temporary grant longer than 24 hours | §6.1.4 |
+
+Without the hook, a v2 run takes `person_token`, `agent_token` and the subject's
+identifier (`subject_did`), which v2 entries must name.

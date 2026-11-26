@@ -14,7 +14,7 @@ defmodule HcpConformanceWeb.RunLive do
 
   use HcpConformanceWeb, :live_view
 
-  alias HcpConformance.{Catalog, Config, Runs}
+  alias HcpConformance.{Catalog, Config, Runs, Spec}
   alias HcpConformanceWeb.Exchanges
 
   @statuses [:pass, :fail, :warn, :skip, :error, :na]
@@ -43,20 +43,26 @@ defmodule HcpConformanceWeb.RunLive do
   def mount(_params, %{"connection" => connection}, socket) when is_map(connection) do
     case Runs.config(connection) do
       {:ok, config} ->
+        # The page lists a version's groups before any request is made, so a
+        # connection that names no version is run as the default one.
+        version = config.spec_version || Spec.default()
+
         {:ok,
          socket
          |> assign(
            page_title: "Run",
-           connection: connection,
+           connection: Map.put(connection, "spec_version", version),
            mode: Config.mode(config),
-           groups: Catalog.groups(),
-           group_counts: group_counts(),
-           total_checks: length(Catalog.all()),
+           spec_version: version,
+           spec_label: Spec.label(version),
+           groups: Catalog.groups(version),
+           group_counts: group_counts(version),
+           total_checks: length(Catalog.all(version)),
            stat_labels: @stat_labels,
            statuses: @statuses,
            filters: @filters
          )
-         |> select(Catalog.groups())
+         |> select(Catalog.groups(version))
          |> reset_run()}
 
       {:error, message} ->
@@ -99,7 +105,10 @@ defmodule HcpConformanceWeb.RunLive do
     <Layouts.app flash={@flash}>
       <.header>
         Conformance run
-        <:subtitle><code class="break-all">{@connection["target"]}</code></:subtitle>
+        <:subtitle>
+          <span id="spec-version">{@spec_label}</span>
+          at <code class="break-all">{@connection["target"]}</code>
+        </:subtitle>
         <:actions>
           <.button href={~p"/session"} method="delete" id="disconnect" class="btn btn-ghost btn-sm">
             <.icon name="hero-arrow-left-start-on-rectangle" /> Disconnect
@@ -388,14 +397,15 @@ defmodule HcpConformanceWeb.RunLive do
   end
 
   def handle_event("select_all", _params, socket),
-    do: {:noreply, select(socket, Catalog.groups())}
+    do: {:noreply, select(socket, socket.assigns.groups)}
 
   def handle_event("select_none", _params, socket), do: {:noreply, select(socket, [])}
 
   def handle_event("run", _params, %{assigns: %{running: true}} = socket), do: {:noreply, socket}
 
   def handle_event("run", params, socket) do
-    groups = params |> get_in(["run", "groups"]) |> selected_groups()
+    all = socket.assigns.groups
+    groups = params |> get_in(["run", "groups"]) |> selected_groups(all)
 
     case Runs.config(Map.put(socket.assigns.connection, "groups", groups)) do
       {:ok, config} ->
@@ -405,7 +415,7 @@ defmodule HcpConformanceWeb.RunLive do
         {:noreply,
          socket
          |> reset_run()
-         |> assign(running: true, run_groups: run_groups(groups))
+         |> assign(running: true, run_groups: run_groups(groups, all))
          |> start_async(:run, fn -> Runs.run(config, on_event: on_event) end)}
 
       {:error, message} ->
@@ -423,15 +433,15 @@ defmodule HcpConformanceWeb.RunLive do
   def handle_event("download", _params, socket), do: {:noreply, socket}
 
   # Every group ticked is no selection at all, so the verdict can be a claim.
-  defp selected_groups(%{} = groups) do
+  defp selected_groups(%{} = groups, all) do
     selected = for {group, "true"} <- groups, do: group
-    if Enum.sort(selected) == Enum.sort(Catalog.groups()), do: nil, else: selected
+    if Enum.sort(selected) == Enum.sort(all), do: nil, else: selected
   end
 
-  defp selected_groups(_none), do: nil
+  defp selected_groups(_none, _all), do: nil
 
-  defp run_groups(nil), do: Catalog.groups()
-  defp run_groups(groups), do: Enum.filter(Catalog.groups(), &(&1 in groups))
+  defp run_groups(nil, all), do: all
+  defp run_groups(groups, all), do: Enum.filter(all, &(&1 in groups))
 
   @impl true
   def handle_info({:run_event, {:started, info}}, socket) do
@@ -554,15 +564,15 @@ defmodule HcpConformanceWeb.RunLive do
       end)
 
     form =
-      to_form(%{"groups" => Map.new(Catalog.groups(), &{&1, to_string(&1 in selected)})},
+      to_form(%{"groups" => Map.new(socket.assigns.groups, &{&1, to_string(&1 in selected)})},
         as: :run
       )
 
     assign(socket, selected: selected, selection: selection, form: form)
   end
 
-  defp group_counts do
-    Catalog.all()
+  defp group_counts(version) do
+    Catalog.all(version)
     |> Enum.group_by(& &1.group)
     |> Map.new(fn {group, checks} ->
       {group,

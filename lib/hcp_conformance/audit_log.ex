@@ -25,10 +25,10 @@ defmodule HcpConformance.AuditLog do
   defp fetch_pages(ctx, token, cursor, acc, page) do
     params = if cursor, do: [limit: 200, cursor: cursor], else: [limit: 200]
     response = Context.request(ctx, :get, Context.url(ctx, :audit), token: token, params: params)
-    Assert.status!(response, 200, "GET /v1/audit")
-    body = Assert.json_object!(response, "GET /v1/audit")
+    Assert.status!(response, 200, "GET the audit log")
+    body = Assert.json_object!(response, "GET the audit log")
     events = body["events"]
-    Assert.check!(is_list(events), "GET /v1/audit: the body has no events array")
+    Assert.check!(is_list(events), "GET the audit log: the body has no events array")
 
     case body["nextCursor"] do
       next when is_binary(next) and next != "" and events != [] ->

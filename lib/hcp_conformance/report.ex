@@ -13,18 +13,14 @@ defmodule HcpConformance.Report do
   MCP checks for a REST-only implementation) do not affect the verdict.
   """
 
-  alias HcpConformance.{Config, Context, Transcript}
+  alias HcpConformance.{Config, Context, Spec, Transcript}
 
   @suite_version Mix.Project.config()[:version]
-  @spec_version "1.0-draft-4"
-
-  @spec spec_version() :: String.t()
-  def spec_version, do: @spec_version
 
   @spec build(Context.t(), [map()], DateTime.t()) :: map()
   def build(ctx, results, started_at) do
     %{
-      suite: %{version: @suite_version, spec_version: @spec_version},
+      suite: %{version: @suite_version, spec_version: Spec.draft(ctx.spec_version)},
       target: Config.public(ctx.config),
       started_at: DateTime.to_iso8601(started_at),
       finished_at: DateTime.utc_now() |> DateTime.to_iso8601(),
