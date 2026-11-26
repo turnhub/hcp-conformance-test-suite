@@ -218,6 +218,19 @@ page at compatible endpoints instead.
 Issuing grants needs the hook. With a person token instead, the page can still
 list and revoke grants, show the audit log and export.
 
+**Against a v2 vault** the page speaks v2, and shows what v2 changed:
+
+- A grant carries the purpose the person approved, and the vault is searched
+  under it.
+- An assistant receives a disclosure of each memory, under a reference of its
+  own and usable until a stated time, not the stored entry.
+- What the person writes is recorded as authenticated. What an assistant says
+  the person said is unverified until the person **confirms** it on the page,
+  and deleted if they **reject** it.
+- There is no minimal response mode, and no quarantine demonstration: the v2
+  reference does not claim the Memory Manager Profile, so it refuses
+  inferences, and the page shows the refusal.
+
 ## What a target needs
 
 The suite runs in one of three modes, chosen from what you supply.
@@ -295,8 +308,6 @@ implementation for it, and leaves v1's untouched.
     --hook-url http://localhost:4000/reference/hcp-v2/conformance-hook \
     --hook-secret reference-hook-secret
   ```
-
-The chat page works with v1 targets only.
 
 ## Reading a report
 
@@ -443,7 +454,7 @@ Layout:
 | `lib/hcp_conformance/envelope.ex` | The §2.2 envelope rules, in either form |
 | `lib/hcp_conformance/reference/` | The reference HCP implementations (`server.ex` for v1, `server_v2.ex` and `model_v2.ex` for v2) and their conformance hook |
 | `lib/hcp_conformance/runs.ex`, `settings.ex` | Starting runs from the web, the concurrency cap, deployment settings |
-| `lib/hcp_conformance/vault.ex`, `assistants.ex`, `open_ai.ex`, `anthropic.ex` | The chat page's vault client (grants, memories, recall, audit, export) and the assistants it talks to |
+| `lib/hcp_conformance/vault.ex`, `vault/v2.ex`, `assistants.ex`, `open_ai.ex`, `anthropic.ex` | The chat page's vault client for either version (grants, memories, recall, confirmation, audit, export) and the assistants it talks to |
 | `lib/hcp_conformance_web/` | The Phoenix app: connect page, run and chat LiveViews, API, reference mount |
 | `lib/hcp_conformance_web/exchanges.ex`, `markdown.ex` | The HTTP exchange component both pages show; Markdown for docs pages and replies |
 | `docs/HOOK.md`, `docs/CHECKS.md`, `docs/CHECKS-v2.md` | The hook protocol (also served at `/hook`) and the check catalogues (`/checks` lists the same checks) |

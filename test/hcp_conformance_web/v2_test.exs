@@ -98,15 +98,6 @@ defmodule HcpConformanceWeb.V2Test do
     assert has_element?(view, "#verdict", "PASS")
   end
 
-  test "the chat page, whose vault client speaks v1, sends a v2 connection to the run", %{
-    conn: conn
-  } do
-    assert {:error, {:redirect, %{to: "/run", flash: %{"info" => info}}}} =
-             conn |> init_test_session(connection: connection()) |> live(~p"/chat")
-
-    assert info =~ "v1"
-  end
-
   test "the catalogue page and the API show the version asked for", %{conn: conn} do
     document =
       conn |> get(~p"/checks?spec_version=2.0") |> html_response(200) |> LazyHTML.from_document()
