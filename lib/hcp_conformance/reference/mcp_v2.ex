@@ -68,7 +68,8 @@ defmodule HcpConformance.Reference.McpV2 do
        "permittedPurposes" => %{
          "type" => "array",
          "items" => %{"type" => "string", "format" => "uri"}
-       }
+       },
+       "relationships" => %{"type" => "array", "items" => %{"type" => "object"}}
      }, ["categories", "content", "declarationType", "sourceContext"],
      "operations/create-result.json"},
     {"hcp_reviseEntry",
@@ -306,10 +307,12 @@ defmodule HcpConformance.Reference.McpV2 do
       }
       |> compact()
 
+    record = compact(%{"provenance" => provenance, "relationships" => arguments["relationships"]})
+
     %{
       "content" => %{"profile" => @general_context, "value" => arguments["content"]},
       "assertion" => assertion,
-      "record" => %{"provenance" => provenance}
+      "record" => record
     }
   end
 

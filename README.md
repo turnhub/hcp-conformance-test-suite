@@ -29,7 +29,7 @@ exists for.
 | | |
 | --- | --- |
 | Specification | HCP v1, 1.0-draft-4 (September 2026); HCP v2, 2.0-draft-3 (November 2026) |
-| Checks | v1: 94 (see [docs/CHECKS.md](docs/CHECKS.md)); v2: 153 (see [docs/CHECKS-v2.md](docs/CHECKS-v2.md)) |
+| Checks | v1: 94 (see [docs/CHECKS.md](docs/CHECKS.md)); v2: 172 (see [docs/CHECKS-v2.md](docs/CHECKS-v2.md)) |
 | Transports | v1: RESTful HTTP in full, MCP manifest only; v2: the HTTP Binding and the MCP Binding over Streamable HTTP, for the First-Party package |
 | Built with | Elixir 1.20, Phoenix 1.8 and LiveView, daisyUI; no database |
 | Guardrails | Boundary, Credo (strict), Dialyzer and the test suite, locally (`mix precommit`) and in GitHub Actions |
@@ -227,9 +227,13 @@ list and revoke grants, show the audit log and export.
 - What the person writes is recorded as authenticated. What an assistant says
   the person said is unverified until the person **confirms** it on the page,
   and deleted if they **reject** it.
-- There is no minimal response mode, and no quarantine demonstration: the v2
-  reference does not claim the Memory Manager Profile, so it refuses
-  inferences, and the page shows the refusal.
+- A vault that claims the Memory Manager Profile, as the v2 reference does,
+  finds conflicts by a method of its own. An inference that contradicts the
+  person is quarantined and withheld from assistants until the person confirms
+  or rejects it; confirming sets the person's earlier statement aside. The
+  reference's method finds a statement and its plain negation ("I am
+  vegetarian", "I am not vegetarian").
+- There is no minimal response mode.
 
 ## What a target needs
 
@@ -274,6 +278,9 @@ just a sample.
 
 ## HCP v2
 
+[docs/V1-TO-V2.md](docs/V1-TO-V2.md) is a one-page summary of what moved between
+the versions and what that means for an implementer.
+
 v2 reorganizes the protocol rather than extending it: conformance claims by
 Part instead of one level, a Management Client and Context Clients on two
 planes, entries disclosed to clients under grant-scoped references with a
@@ -289,14 +296,15 @@ implementation for it, and leaves v1's untouched.
   ([docs/HOOK.md](docs/HOOK.md#hcp-v2)). Without the hook, give the subject's
   identifier as well as the tokens (`--subject-did`): a v2 entry must name its
   Context Subject.
-- **What is checked.** 153 checks for the First-Party package over both
-  bindings: Core, the General Context Profile, the First-Party Authorization
-  Profile, the HTTP Binding, and the MCP Binding over Streamable HTTP.
+- **What is checked.** 172 checks for the First-Party package over both
+  bindings, and the Memory Manager Profile: Core, the General Context Profile,
+  the First-Party Authorization Profile, the HTTP Binding, the MCP Binding
+  over Streamable HTTP, and conflicts between entries.
   [docs/CHECKS-v2.md](docs/CHECKS-v2.md) lists them. A target gets the checks
   of the bindings it lists; an MCP-only vault gets the tool checks, and `N/A`
   on what needs the governance plane, which only the HTTP Binding carries.
-- **What is not, yet.** MCP over stdio, the OAuth, VC Evidence, Memory Manager
-  and Delegated Authorization profiles, import, the disclosure summary,
+- **What is not, yet.** MCP over stdio, the OAuth, VC Evidence and Delegated
+  Authorization profiles, import, the disclosure summary,
   revocation notifications and JSON Schema validation. A pass is a
   claim about the surface checked, not about all of v2.
   [docs/V2.md](docs/V2.md) has the full list, and the notes from reviewing
@@ -400,8 +408,8 @@ mix setup
 mix test           # about 190 tests, 10 seconds; no network beyond localhost
 mix precommit      # compile with warnings as errors (Boundary included), unused deps,
                    # format, credo --strict, tests, dialyzer
-mix hcp.checks > docs/CHECKS.md    # after adding or changing a check; a test enforces it
-mix hcp.checks --spec-version 2.0 > docs/CHECKS-v2.md    # the same for a v2 check
+mix hcp.checks --write    # after adding or changing a check: refreshes docs/CHECKS.md
+                          # and docs/CHECKS-v2.md; a test enforces both
 ```
 
 **Guardrails.** Boundary fails the build when a module reaches across a boundary
@@ -455,13 +463,14 @@ Layout:
 | `lib/hcp_conformance/runner.ex`, `context.ex`, `report.ex` | Running a suite: setup, sequencing, verdict |
 | `lib/hcp_conformance/http.ex`, `transcript.ex`, `target_guard.ex` | Talking to targets, recording, redaction, private-network guard |
 | `lib/hcp_conformance/envelope.ex` | The §2.2 envelope rules, in either form |
-| `lib/hcp_conformance/reference/` | The reference HCP implementations (`server.ex` for v1; `server_v2.ex`, `model_v2.ex` and `mcp_v2.ex` for v2) and their conformance hook |
+| `lib/hcp_conformance/reference/` | The reference HCP implementations (`server.ex` for v1; `server_v2.ex`, `model_v2.ex`, `conflicts_v2.ex` and `mcp_v2.ex` for v2) and their conformance hook |
 | `lib/hcp_conformance/runs.ex`, `settings.ex` | Starting runs from the web, the concurrency cap, deployment settings |
 | `lib/hcp_conformance/vault.ex`, `vault/v2.ex`, `assistants.ex`, `open_ai.ex`, `anthropic.ex` | The chat page's vault client for either version (grants, memories, recall, confirmation, audit, export) and the assistants it talks to |
 | `lib/hcp_conformance_web/` | The Phoenix app: connect page, run and chat LiveViews, API, reference mount |
 | `lib/hcp_conformance_web/exchanges.ex`, `markdown.ex` | The HTTP exchange component both pages show; Markdown for docs pages and replies |
 | `docs/HOOK.md`, `docs/CHECKS.md`, `docs/CHECKS-v2.md` | The hook protocol (also served at `/hook`) and the check catalogues (`/checks` lists the same checks) |
 | `docs/V2.md` | v2 in the suite: coverage, gaps, and review notes on the draft |
+| `docs/V1-TO-V2.md` | What moved between v1 and v2, and what it means for implementers |
 
 ## Known limits
 

@@ -18,7 +18,9 @@ defmodule HcpConformance.ReferenceTarget do
     server = if opts[:version] == "2.0", do: ServerV2, else: Server
 
     plug =
-      {server, [store: store, hook_secret: @secret] ++ Keyword.take(opts, [:faults, :bindings])}
+      {server,
+       [store: store, hook_secret: @secret] ++
+         Keyword.take(opts, [:faults, :bindings, :memory_manager, :detects])}
 
     {:ok, pid} = Bandit.start_link(plug: plug, port: 0, ip: :loopback, startup_log: false)
     {:ok, {_ip, port}} = ThousandIsland.listener_info(pid)

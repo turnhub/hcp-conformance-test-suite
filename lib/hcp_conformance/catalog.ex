@@ -26,6 +26,7 @@ defmodule HcpConformance.Catalog do
     V2.Checks.Entries,
     V2.Checks.Idempotency,
     V2.Checks.Query,
+    V2.Checks.Conflicts,
     V2.Checks.Grants,
     V2.Checks.Governance,
     V2.Checks.Rules,

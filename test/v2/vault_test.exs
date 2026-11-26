@@ -159,20 +159,46 @@ defmodule HcpConformance.V2.VaultTest do
     assert {:ok, []} = Vault.recall(vault, grant, "steak")
   end
 
-  test "an inference is refused by a vault that does not claim the Memory Manager Profile", %{
+  test "an assistant's inference that contradicts the person is quarantined, not recalled", %{
     vault: vault
   } do
+    remember!(vault, :person, "I am vegetarian.", %{dimension: "diet"})
     grant = grant!(vault, @claude, %{actions: ["read", "write"]})
 
-    assert {:error, %{status: 422, type: "malformed-request", detail: detail}} =
-             Vault.remember(vault, grant.token, %{
-               text: "Loves steak.",
-               category: "general_preferences",
-               declaration_type: "model-inferred",
-               confidence: "medium"
-             })
+    remember!(vault, grant.token, "I am not vegetarian.", %{
+      dimension: "diet",
+      declaration_type: "model-inferred",
+      confidence: "medium"
+    })
 
-    assert detail =~ "Memory Manager"
+    assert Vault.status(stored(vault, "I am not vegetarian.")) == "conflicted"
+    assert Vault.status(stored(vault, "I am vegetarian.")) == "active"
+
+    assert {:ok, entries} = Vault.recall(vault, grant, "vegetarian")
+    assert Enum.map(entries, &Vault.preference/1) == ["I am vegetarian."]
+
+    assert {:ok, events} = Vault.audit(vault)
+    assert Enum.any?(events, &(&1["eventType"] == "conflict.detected"))
+  end
+
+  test "accepting a quarantined inference makes it active and sets the person's statement aside",
+       %{
+         vault: vault
+       } do
+    remember!(vault, :person, "I am vegetarian.")
+    grant = grant!(vault, @claude, %{actions: ["read", "write"]})
+
+    remember!(vault, grant.token, "I am not vegetarian.", %{
+      declaration_type: "model-inferred",
+      confidence: "medium"
+    })
+
+    assert {:ok, accepted} =
+             Vault.confirm(vault, stored(vault, "I am not vegetarian."), "confirmed")
+
+    assert Vault.status(accepted) == "active"
+    assert Vault.declaration(accepted) == "model-inferred"
+    assert Vault.status(stored(vault, "I am vegetarian.")) == "deprecated"
   end
 
   test "the audit log shows each grant, read and revocation, newest first", %{vault: vault} do
