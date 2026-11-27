@@ -71,7 +71,7 @@ defmodule HcpConformance.MixProject do
        depth: 1},
       {:daisyui,
        github: "saadeghi/daisyui",
-       tag: "v5.8.0",
+       tag: "v5.8.1",
        sparse: "packages/bundle",
        app: false,
        compile: false,
